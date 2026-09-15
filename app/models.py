@@ -1,6 +1,27 @@
-from sqlalchemy import JSON, Column, DateTime, Integer, func
+from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, func
 
 from .database import Base
+
+
+class Record(Base):
+    """One 'watched/read it' log entry (book, anime, or movie).
+
+    photo_url points at an object in S3 — the browser uploads the photo
+    directly through the API, which forwards it to S3 and stores only the
+    resulting URL here, instead of putting image bytes in the database.
+    """
+
+    __tablename__ = "records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cat = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    creator = Column(String, nullable=True)
+    rating = Column(Float, nullable=False, default=0)
+    memo = Column(String, nullable=True)
+    photo_url = Column(String, nullable=True)
+    date = Column(String, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class Page(Base):

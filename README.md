@@ -1,9 +1,12 @@
 # mysite-backend
 
-번호가 매겨진 페이지를 넘기며 그리는 "스케치북" 웹앱의 백엔드 API 서버.
-프론트엔드(`sketchbook.html`)는 별도의 [mysite](../mysite) 레포에 있고,
-이 서버는 그 프론트엔드가 그림을 저장/불러오고 실시간으로 동기화하는 데
-사용하는 REST API + WebSocket을 제공.
+개인 사이트의 여러 "방"이 공유하는 백엔드 API 서버. 프론트엔드는 별도의
+[mysite](../mysite) 레포에 있음.
+
+- **스케치북** (`sketchbook.html`) — 번호가 매겨진 페이지를 넘기며
+  그리는 캔버스. 그림 저장/실시간 동기화에 REST API + WebSocket 사용.
+- **기록 보관소** (`library.html`) — 읽거나 본 책/애니/영화 기록. REST
+  API로 CRUD, 사진은 S3에 업로드하고 URL만 저장.
 
 ## 스택
 
@@ -11,6 +14,8 @@
   페이지별 실시간 브로드캐스트용 WebSocket(`/ws/pages/{n}`).
 - **PostgreSQL** — SQLAlchemy ORM으로 접근. `DATABASE_URL` 환경 변수만
   바꾸면 동일한 코드로 로컬 테스트용 SQLite도 그대로 동작(테스트가 이 방식 사용).
+- **S3(boto3)** — 기록 보관소 사진 저장소. `POST /api/uploads`가 파일을
+  받아 S3에 올리고 URL을 돌려줌.
 - **Docker + docker-compose** — API 컨테이너와 PostgreSQL 컨테이너를 한 번에 실행.
 - **GitHub Actions** — 푸시할 때마다 테스트 실행 → 통과하면 Docker 이미지를
   빌드해서 GitHub Container Registry(ghcr.io)에 푸시.
@@ -32,6 +37,17 @@ docker compose up --build
 Blueprint. Render 대시보드에서 "New +" → "Blueprint"로 이 GitHub 레포를
 연결하면 두 서비스가 자동으로 생성되고, 이후 `main`에 push할 때마다
 자동 배포됨.
+
+기록 보관소의 사진 업로드를 쓰려면 S3 버킷도 하나 필요함:
+
+1. AWS에 S3 버킷 생성 (리전 아무거나, 나중에 `AWS_REGION`에 맞춰 적으면 됨).
+2. 버킷 정책으로 `GetObject`를 퍼블릭 허용 (업로드된 사진 URL이 그대로
+   `<img>` 태그에서 로딩돼야 하므로 — "Block all public access" 해제 필요).
+3. 그 버킷에만 `PutObject` 권한을 가진 IAM 사용자를 만들고 액세스 키 발급.
+4. Render 대시보드 → `sketchbook-api` → Environment 탭에서
+   `S3_BUCKET_NAME`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`,
+   `AWS_SECRET_ACCESS_KEY` 네 값을 채워 넣기 (`render.yaml`에는
+   `sync: false`로만 선언돼 있어 git에는 값이 올라가지 않음).
 
 ## 프론트엔드와 연결하기
 

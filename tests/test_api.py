@@ -108,3 +108,69 @@ def test_deleting_the_last_page_just_shrinks_the_count():
     assert resp.status_code == 200
     assert resp.json() == {"count": 1}
     assert client.get("/api/pages/2").status_code == 404
+
+
+def make_record(**overrides):
+    body = {"cat": "book", "title": "데미안", "creator": "헤르만 헤세", "rating": 4.5, "memo": "좋았음"}
+    body.update(overrides)
+    return body
+
+
+def test_create_and_list_records():
+    resp = client.post("/api/records", json=make_record())
+    assert resp.status_code == 200
+    created = resp.json()
+    assert created["title"] == "데미안"
+    assert created["date"]  # server-assigned
+
+    resp = client.get("/api/records")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+
+
+def test_list_records_filters_by_cat():
+    client.post("/api/records", json=make_record(cat="book"))
+    client.post("/api/records", json=make_record(cat="movie", title="기생충"))
+
+    resp = client.get("/api/records", params={"cat": "movie"})
+    assert resp.status_code == 200
+    titles = [r["title"] for r in resp.json()]
+    assert titles == ["기생충"]
+
+
+def test_update_record():
+    created = client.post("/api/records", json=make_record()).json()
+
+    resp = client.put(f"/api/records/{created['id']}", json=make_record(rating=5, memo="다시 읽음"))
+    assert resp.status_code == 200
+    assert resp.json()["rating"] == 5
+    assert resp.json()["memo"] == "다시 읽음"
+
+
+def test_update_missing_record_is_404():
+    resp = client.put("/api/records/999", json=make_record())
+    assert resp.status_code == 404
+
+
+def test_delete_record():
+    created = client.post("/api/records", json=make_record()).json()
+
+    resp = client.delete(f"/api/records/{created['id']}")
+    assert resp.status_code == 200
+    assert client.get("/api/records").json() == []
+
+
+def test_delete_missing_record_is_404():
+    resp = client.delete("/api/records/999")
+    assert resp.status_code == 404
+
+
+def test_upload_photo_returns_s3_url(monkeypatch):
+    async def fake_upload(file):
+        return "https://fake-bucket.s3.ap-northeast-2.amazonaws.com/records/fake.jpg"
+
+    monkeypatch.setattr("app.main.storage.upload_photo", fake_upload)
+
+    resp = client.post("/api/uploads", files={"file": ("photo.jpg", b"fake-bytes", "image/jpeg")})
+    assert resp.status_code == 200
+    assert resp.json()["url"].startswith("https://fake-bucket.s3.")

@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Optional, Tuple
 
 from sqlalchemy import func
@@ -72,3 +73,38 @@ def delete_page(db: Session, page_number: int) -> Tuple[bool, Optional[str]]:
     )
     db.commit()
     return True, None
+
+
+def list_records(db: Session, cat: Optional[str] = None) -> list:
+    q = db.query(models.Record)
+    if cat is not None:
+        q = q.filter(models.Record.cat == cat)
+    return q.order_by(models.Record.date.desc(), models.Record.id.desc()).all()
+
+
+def create_record(db: Session, data: dict) -> models.Record:
+    record = models.Record(**data, date=date.today().isoformat())
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def update_record(db: Session, record_id: int, data: dict) -> Optional[models.Record]:
+    record = db.query(models.Record).filter(models.Record.id == record_id).first()
+    if record is None:
+        return None
+    for key, value in data.items():
+        setattr(record, key, value)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def delete_record(db: Session, record_id: int) -> bool:
+    record = db.query(models.Record).filter(models.Record.id == record_id).first()
+    if record is None:
+        return False
+    db.delete(record)
+    db.commit()
+    return True

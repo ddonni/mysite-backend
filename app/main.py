@@ -1,12 +1,12 @@
 import os
 from contextlib import asynccontextmanager
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from . import crud, schemas
+from . import crud, schemas, storage
 from .database import Base, SessionLocal, engine, get_db
 
 
@@ -105,6 +105,38 @@ def remove_page(n: int, db: Session = Depends(get_db)):
         status_code = 400 if reason == "last_page" else 404
         raise HTTPException(status_code=status_code, detail=reason)
     return {"count": crud.get_count(db)}
+
+
+@app.get("/api/records", response_model=List[schemas.RecordOut])
+def list_records(cat: Optional[str] = None, db: Session = Depends(get_db)):
+    return crud.list_records(db, cat)
+
+
+@app.post("/api/records", response_model=schemas.RecordOut)
+def create_record(body: schemas.RecordIn, db: Session = Depends(get_db)):
+    return crud.create_record(db, body.model_dump())
+
+
+@app.put("/api/records/{record_id}", response_model=schemas.RecordOut)
+def update_record(record_id: int, body: schemas.RecordIn, db: Session = Depends(get_db)):
+    record = crud.update_record(db, record_id, body.model_dump())
+    if record is None:
+        raise HTTPException(status_code=404, detail="record not found")
+    return record
+
+
+@app.delete("/api/records/{record_id}")
+def remove_record(record_id: int, db: Session = Depends(get_db)):
+    ok = crud.delete_record(db, record_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="record not found")
+    return {"ok": True}
+
+
+@app.post("/api/uploads", response_model=schemas.UploadOut)
+async def upload_photo(file: UploadFile = File(...)):
+    url = await storage.upload_photo(file)
+    return {"url": url}
 
 
 @app.websocket("/ws/pages/{n}")

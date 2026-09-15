@@ -12,6 +12,16 @@ services:
           property: connectionString
       - key: CORS_ORIGINS
         value: "https://ddonni.github.io"
+      # S3 credentials/bucket aren't tracked here — set these directly in
+      # the Render dashboard (Environment tab) after creating the bucket.
+      - key: S3_BUCKET_NAME
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
 
 databases:
   - name: sketchbook-db

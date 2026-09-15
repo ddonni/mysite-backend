@@ -1,8 +1,11 @@
 # mysite-backend
 
-"스케치북" 웹앱의 백엔드 API 서버. 번호가 매겨진 페이지를 넘기며 그리는
-캔버스 프론트엔드가 그림을 저장/실시간 동기화하는 데 쓰는 REST API +
-WebSocket을 제공한다. 자세한 엔드포인트 스펙은 `API.md` 참고.
+개인 사이트의 여러 "방"이 공유하는 백엔드 API 서버.
+
+- **스케치북**: 번호가 매겨진 페이지를 넘기며 그리는 캔버스가 그림을
+  저장/실시간 동기화하는 데 쓰는 REST API + WebSocket.
+- **기록 보관소**: 읽거나 본 책/애니/영화를 기록하는 목록의 CRUD API.
+  사진은 S3에 올리고 URL만 DB에 저장.
 
 ## 스택 및 이유
 
@@ -10,12 +13,19 @@ WebSocket을 제공한다. 자세한 엔드포인트 스펙은 `API.md` 참고.
   WebSocket(`/ws/pages/{n}`)을 같은 프레임워크로 처리.
 - **PostgreSQL + SQLAlchemy ORM** — `DATABASE_URL` 환경 변수만 바꾸면
   동일 코드로 테스트용 SQLite도 그대로 동작 (테스트가 이 방식 사용).
+- **S3(boto3)** — 기록 보관소의 사진 저장소. DB에는 이미지 바이트 대신
+  `photo_url`만 들어감.
 - **Docker + docker-compose** — `api` 컨테이너 + `db`(Postgres) 컨테이너.
 - **GitHub Actions** (`.github/workflows/ci.yml`) — push마다 pytest 실행 →
-  통과하면 Docker 이미지 빌드해서 `ghcr.io/<owner>/sketchbook-api`에 푸시.
+  통과하면 Docker 이미지 빌드해서 `ghcr.io/<owner>/sketchbook-api`에 푸시
+  (참고용 빌드일 뿐, 실제 배포는 아래 Render가 소스에서 직접 빌드).
 
-배포 호스트(Render/Fly.io/AWS 등)는 아직 미정 — 결정되면 README와 이
-파일의 "프론트엔드와 연결" 항목을 업데이트할 것.
+배포 호스트는 **Render**. `render.yaml`(Blueprint)이 API 서비스와
+PostgreSQL DB를 함께 정의하고, `main` push마다 자동 재배포됨.
+`DATABASE_URL`은 `fromDatabase`로 자동 주입. S3 관련 4개 변수
+(`S3_BUCKET_NAME`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`)는 `render.yaml`에 `sync: false`로만 선언돼
+있고 실제 값은 Render 대시보드 Environment 탭에서 수동으로 채워야 함.
 
 ## 빌드/테스트 명령
 
@@ -29,9 +39,10 @@ pip install -r requirements-dev.txt && pytest -q   # 테스트
 ```
 app/
   main.py       # FastAPI 앱, CORS, WebSocket ConnectionManager, 모든 라우트
-  models.py     # SQLAlchemy 모델 (Page)
+  models.py     # SQLAlchemy 모델 (Page, Record)
   schemas.py    # Pydantic 스키마
   crud.py       # DB 접근 로직
+  storage.py    # S3 사진 업로드
 tests/test_api.py
 ```
 
@@ -52,11 +63,15 @@ tests/test_api.py
   전체를 교체하는 API. 저장 성공 시 같은 페이지를 보고 있는 다른
   WebSocket 클라이언트에게 `{"type": "strokes", "strokes": [...]}`을
   브로드캐스트한다.
-- `CORS_ORIGINS` 환경 변수로 허용 도메인 제어 (기본값 `*`). 실제 배포
-  후에는 프론트엔드 실제 주소로 좁힐 것.
+- `POST /api/uploads`는 사진 파일을 받아 S3에 올리고 URL만 반환한다.
+  기록을 저장/수정할 때는 이 URL을 먼저 받아서 `photo_url`로 넘겨야
+  함 — 사진 바이트 자체를 `/api/records`로 보내지 않는다.
+- `CORS_ORIGINS` 환경 변수로 허용 도메인 제어. 현재 값은 배포된 프론트
+  주소(`https://ddonni.github.io`)로 좁혀져 있음.
 
 ## 관련 저장소
 
-프론트엔드(`sketchbook.html`)는 별도 레포 `mysite`에 있음. 이 서버가
-꺼져 있으면 프론트엔드는 자동으로 이 기기 로컬 저장 모드로 동작하도록
-되어 있음(백엔드 쪽에서 별도 대응 불필요).
+프론트엔드는 별도 레포 `mysite`에 있음 — `sketchbook.html`(그림판),
+`library.html`(기록 보관소). 이 서버가 꺼져 있으면 `sketchbook.html`은
+자동으로 이 기기 로컬 저장 모드로 동작하도록 되어 있음(백엔드 쪽에서
+별도 대응 불필요). `library.html`은 서버 의존적이라 별도 폴백 없음.

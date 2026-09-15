@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -37,3 +37,25 @@ class NewPageOut(BaseModel):
 
 class DeleteOut(BaseModel):
     count: int
+
+
+class RecordIn(BaseModel):
+    """One 'watched/read it' log entry. photo_url comes from POST
+    /api/uploads — the client uploads the photo first, then sends the
+    returned URL along with the rest of the fields."""
+
+    cat: Literal["book", "anime", "movie"]
+    title: str
+    creator: Optional[str] = None
+    rating: float = 0
+    memo: Optional[str] = None
+    photo_url: Optional[str] = None
+
+
+class RecordOut(RecordIn):
+    id: int
+    date: str
+
+
+class UploadOut(BaseModel):
+    url: str
