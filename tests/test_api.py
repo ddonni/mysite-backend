@@ -9,7 +9,8 @@ os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 import pytest
 from fastapi.testclient import TestClient
 
-from app.database import Base, engine
+from app import crud
+from app.database import Base, SessionLocal, engine
 from app.main import app
 
 client = TestClient(app)
@@ -17,15 +18,30 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def fresh_database():
-    """Start every test from an empty, freshly-created schema."""
+    """Start every test from an empty, freshly-created schema with page 1
+    already in it — the same state the app's own startup produces, but
+    TestClient only runs that startup lifespan when entered as a context
+    manager (`with TestClient(app) as c`), which this module doesn't do."""
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        crud.ensure_first_page(db)
+    finally:
+        db.close()
     yield
     Base.metadata.drop_all(bind=engine)
 
 
 def make_stroke(stroke_id="s1"):
-    return {"id": stroke_id, "c": "#2b2b2e", "e": False, "s": 4, "by": "test", "p": [[0.1, 0.1], [0.2, 0.2]]}
+    return {
+        "id": stroke_id,
+        "color": "#2b2b2e",
+        "eraser": False,
+        "width": 4,
+        "author": "test",
+        "points": [[0.1, 0.1], [0.2, 0.2]],
+    }
 
 
 def test_fresh_db_has_one_empty_page():

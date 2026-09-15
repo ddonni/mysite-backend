@@ -10,11 +10,11 @@ class Stroke(BaseModel):
     used to de-duplicate when a save races with another viewer's."""
 
     id: str
-    c: Optional[str] = None
-    e: bool = False
-    s: float
-    by: Optional[str] = None
-    p: List[List[float]]
+    color: Optional[str] = None
+    eraser: bool = False
+    width: float
+    author: Optional[str] = None
+    points: List[List[float]]
 
 
 class StrokesIn(BaseModel):

@@ -26,12 +26,20 @@ docker compose up --build
 
 `.env.example`을 `.env`로 복사해서 값을 바꿀 수 있음(docker-compose가 자동으로 읽음).
 
+## 배포 (Render)
+
+`render.yaml`이 API 서비스 + PostgreSQL DB를 함께 정의해둔 Render
+Blueprint. Render 대시보드에서 "New +" → "Blueprint"로 이 GitHub 레포를
+연결하면 두 서비스가 자동으로 생성되고, 이후 `main`에 push할 때마다
+자동 배포됨.
+
 ## 프론트엔드와 연결하기
 
-1. 이 서버를 실제로 배포한 뒤(Render, Fly.io, AWS 등), `CORS_ORIGINS` 환경
-   변수에 프론트엔드가 서비스되는 실제 주소(예: `https://<사용자명>.github.io`)를 넣기.
+1. Render에 배포한 뒤, `CORS_ORIGINS` 환경 변수에 프론트엔드가 서비스되는
+   실제 주소(예: `https://<사용자명>.github.io`)를 넣기(현재 `render.yaml`
+   기본값은 `*`).
 2. `mysite` 레포의 `sketchbook.html` 상단 `API_BASE` 상수를 이 서버의 배포된
-   주소로 바꾸기.
+   주소(`https://sketchbook-api.onrender.com` 형태)로 바꾸기.
 
 ## 테스트
 
