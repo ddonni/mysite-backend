@@ -11,7 +11,7 @@ services:
           name: sketchbook-db
           property: connectionString
       - key: CORS_ORIGINS
-        value: "*"
+        value: "https://ddonni.github.io"
 
 databases:
   - name: sketchbook-db
