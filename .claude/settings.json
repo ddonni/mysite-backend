@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pytest*)",
+      "Edit(C:\\Users\\User\\Documents\\mysite-project\\*)",
+      "Write(C:\\Users\\User\\Documents\\mysite-project\\*)",
+      "Read(C:\\Users\\User\\Documents\\mysite-project\\*)"
+    ]
+  }
+}

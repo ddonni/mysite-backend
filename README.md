@@ -8,10 +8,15 @@
 - **기록 보관소** (`library.html`) — 읽거나 본 책/애니/영화 기록. REST
   API로 CRUD, 사진은 S3에 업로드하고 URL만 저장.
 
+모든 데이터는 **방(room)** 단위로 나뉨 — 처음 방문하면 자동으로 방
+코드(6자리)와 비밀 토큰을 발급받고(로그인 없음), 그 코드를 아는
+사람은 누구나 방을 구경할 수 있지만(읽기 전용) 토큰을 가진 본인만
+그리거나 기록을 남길 수 있음.
+
 ## 스택
 
-- **[FastAPI](https://fastapi.tiangolo.com/)** — REST API(`/api/...`)와
-  페이지별 실시간 브로드캐스트용 WebSocket(`/ws/pages/{n}`).
+- **[FastAPI](https://fastapi.tiangolo.com/)** — REST API(`/api/rooms/{code}/...`)와
+  페이지별 실시간 브로드캐스트용 WebSocket(`/ws/rooms/{code}/pages/{n}`).
 - **PostgreSQL** — SQLAlchemy ORM으로 접근. `DATABASE_URL` 환경 변수만
   바꾸면 동일한 코드로 로컬 테스트용 SQLite도 그대로 동작(테스트가 이 방식 사용).
 - **S3(boto3)** — 기록 보관소 사진 저장소. `POST /api/uploads`가 파일을
@@ -37,6 +42,11 @@ docker compose up --build
 Blueprint. Render 대시보드에서 "New +" → "Blueprint"로 이 GitHub 레포를
 연결하면 두 서비스가 자동으로 생성되고, 이후 `main`에 push할 때마다
 자동 배포됨.
+
+rooms 기능을 처음 배포할 때는 `app/migrations.py`가 기동 시 한 번
+자동으로 실행돼서, rooms 도입 이전에 만들어진 기존 페이지/기록을
+"legacy" 방 하나에 몰아넣고 스키마를 현재 모델에 맞게 보정함 — 별도
+수동 작업 불필요 (자세한 내용은 그 파일의 docstring 참고).
 
 기록 보관소의 사진 업로드를 쓰려면 S3 버킷도 하나 필요함:
 

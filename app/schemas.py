@@ -3,6 +3,16 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel
 
 
+class RoomOut(BaseModel):
+    """Returned once, right after a room is created. `token` is the
+    secret that proves ownership on future writes — the client stores it
+    (localStorage) and never shows it on screen. `code` is the short,
+    shareable id that goes in URLs and that visitors type in."""
+
+    code: str
+    token: str
+
+
 class Stroke(BaseModel):
     """One pen or eraser stroke, in the same compact shape the canvas
     stores it in: normalized (0..1) points so it renders correctly at any
