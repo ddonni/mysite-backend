@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database import Base, engine
-from app.main import app
+from app.main import ROOM_CREATE_LIMIT, _room_creations, app
 
 client = TestClient(app)
 
@@ -23,6 +23,10 @@ def fresh_database():
     "ensure_first_page" startup step to replicate here."""
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    # Every test in this file hits the same TestClient "IP", so the
+    # room-creation rate limit (see app.main) must reset per test too — same
+    # reasoning as resetting the database.
+    _room_creations.clear()
     yield
     Base.metadata.drop_all(bind=engine)
 
@@ -75,6 +79,13 @@ def test_room_lookup_by_code(room):
 def test_unknown_room_code_is_404():
     resp = client.get("/api/rooms/ZZZZZZ")
     assert resp.status_code == 404
+
+
+def test_room_creation_is_rate_limited_per_ip():
+    for _ in range(ROOM_CREATE_LIMIT):
+        assert client.post("/api/rooms").status_code == 200
+    resp = client.post("/api/rooms")
+    assert resp.status_code == 429
 
 
 # --- pages: read-only vs owner ---

@@ -1,8 +1,9 @@
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -66,6 +67,36 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Anyone can create a room with no login, so this is the one endpoint that's
+# open to spam (each room costs a Postgres row and, once used, S3 storage).
+# A per-IP fixed-window counter in process memory is enough at this site's
+# scale (Render free tier runs a single instance, and rooms are only ever
+# shared with a handful of people) — no Redis needed.
+_room_creations: Dict[str, List[datetime]] = {}
+ROOM_CREATE_LIMIT = 5
+ROOM_CREATE_WINDOW = timedelta(hours=1)
+
+
+def _client_ip(request: Request) -> str:
+    # Render terminates TLS and proxies to the container, so
+    # request.client.host is Render's internal IP, not the visitor's — the
+    # real IP is the first entry Render adds to X-Forwarded-For. Fall back
+    # to request.client.host for local/test runs where that header is absent.
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_room_rate_limit(request: Request) -> None:
+    ip = _client_ip(request)
+    now = datetime.now(timezone.utc)
+    recent = [t for t in _room_creations.get(ip, []) if now - t < ROOM_CREATE_WINDOW]
+    if len(recent) >= ROOM_CREATE_LIMIT:
+        raise HTTPException(status_code=429, detail="too many rooms created, try again later")
+    recent.append(now)
+    _room_creations[ip] = recent
+
 
 def get_room(code: str, db: Session = Depends(get_db)) -> models.Room:
     room = crud.get_room_by_code(db, code)
@@ -84,7 +115,8 @@ def require_owner(room: models.Room = Depends(get_room), x_room_token: Optional[
 
 
 @app.post("/api/rooms", response_model=schemas.RoomOut)
-def create_room(db: Session = Depends(get_db)):
+def create_room(request: Request, db: Session = Depends(get_db)):
+    _check_room_rate_limit(request)
     room = crud.create_room(db)
     return {"code": room.code, "token": room.token}
 
