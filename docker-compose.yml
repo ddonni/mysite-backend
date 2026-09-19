@@ -23,6 +23,12 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://sketchbook:sketchbook@db:5432/sketchbook
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      # 사진 업로드(S3) 테스트용 — 값은 .env 파일에만 적어두고(git에는
+      # 안 올라감), 안 채워도 나머지 기능은 그대로 동작함(업로드만 실패).
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
     ports:
       - "8000:8000"
 

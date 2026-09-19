@@ -192,7 +192,15 @@ def remove_record(record_id: int, room: models.Room = Depends(require_owner), db
 
 @app.post("/api/rooms/{code}/uploads", response_model=schemas.UploadOut)
 async def upload_photo(file: UploadFile = File(...), room: models.Room = Depends(require_owner)):
-    url = await storage.upload_photo(file)
+    # S3 자격증명이 없거나(로컬 개발 환경 등) 버킷에 문제가 생기면
+    # boto3가 예외를 던짐 — 그걸 그대로 흘려보내면 처리 안 된 예외가 돼서
+    # CORSMiddleware를 거치지 않고 CORS 헤더 없는 500이 나가버림. 브라우저는
+    # 그걸 실제 원인(업로드 실패) 대신 "CORS 에러"로 잘못 표시하니, 여기서
+    # 붙잡아 CORS 헤더가 정상적으로 붙는 HTTPException으로 바꿔줌.
+    try:
+        url = await storage.upload_photo(file)
+    except Exception:
+        raise HTTPException(status_code=502, detail="upload failed")
     return {"url": url}
 
 

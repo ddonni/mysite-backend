@@ -25,7 +25,7 @@ class Room(Base):
 
 
 class Record(Base):
-    """One 'watched/read it' log entry (book, anime, or movie).
+    """One 'watched/read it' log entry (book, anime, movie, or music).
 
     photo_url points at an object in S3 — the browser uploads the photo
     directly through the API, which forwards it to S3 and stores only the

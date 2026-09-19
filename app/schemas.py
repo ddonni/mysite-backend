@@ -54,7 +54,7 @@ class RecordIn(BaseModel):
     /api/uploads — the client uploads the photo first, then sends the
     returned URL along with the rest of the fields."""
 
-    cat: Literal["book", "anime", "movie"]
+    cat: Literal["book", "anime", "movie", "music"]
     title: str
     creator: Optional[str] = None
     rating: float = 0
