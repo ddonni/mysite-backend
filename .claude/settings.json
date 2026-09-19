@@ -1,10 +1,35 @@
 {
   "permissions": {
+    "additionalDirectories": [
+      "C:\\Users\\kwakd\\Documents\\mysite-project"
+    ],
     "allow": [
-      "Bash(pytest*)",
-      "Edit(C:\\Users\\User\\Documents\\mysite-project\\*)",
-      "Write(C:\\Users\\User\\Documents\\mysite-project\\*)",
-      "Read(C:\\Users\\User\\Documents\\mysite-project\\*)"
+      "Bash(*)",
+      "PowerShell(*)",
+      "Edit(C:\\Users\\kwakd\\Documents\\mysite-project\\**)",
+      "Read(C:\\Users\\kwakd\\Documents\\mysite-project\\**)"
+    ],
+    "ask": [
+      "Bash(git commit*)",
+      "Bash(git push*)",
+      "Bash(git merge*)",
+      "Bash(git rebase*)",
+      "Bash(git reset*)",
+      "Bash(git cherry-pick*)",
+      "Bash(git revert*)",
+      "Bash(git stash*)",
+      "Bash(git clean*)",
+      "Bash(git tag*)",
+      "PowerShell(git commit*)",
+      "PowerShell(git push*)",
+      "PowerShell(git merge*)",
+      "PowerShell(git rebase*)",
+      "PowerShell(git reset*)",
+      "PowerShell(git cherry-pick*)",
+      "PowerShell(git revert*)",
+      "PowerShell(git stash*)",
+      "PowerShell(git clean*)",
+      "PowerShell(git tag*)"
     ]
   }
 }
