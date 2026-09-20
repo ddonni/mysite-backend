@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -43,6 +43,9 @@ class Record(Base):
     memo = Column(String, nullable=True)
     photo_url = Column(String, nullable=True)
     date = Column(String, nullable=False)
+    # 방마다 딱 하나만 "이달의 작품"으로 켜져 있음(로비 액자에 걸림) —
+    # crud.set_featured가 새로 켤 때 같은 방의 나머지를 자동으로 끔.
+    featured = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     room = relationship("Room", back_populates="records")

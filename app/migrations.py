@@ -44,6 +44,10 @@ def run_startup_migrations(engine: Engine) -> None:
         if "pages" not in inspector.get_table_names():
             return  # brand-new database; create_all() already built the current schema
 
+        if "records" in inspector.get_table_names() and not _has_column(inspector, "records", "featured"):
+            print("[migrations] adding records.featured column")
+            conn.execute(text("ALTER TABLE records ADD COLUMN featured BOOLEAN NOT NULL DEFAULT false"))
+
         pages_need_room = not _has_column(inspector, "pages", "room_id")
         records_need_room = "records" in inspector.get_table_names() and not _has_column(
             inspector, "records", "room_id"

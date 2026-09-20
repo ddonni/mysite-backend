@@ -65,6 +65,14 @@ class RecordIn(BaseModel):
 class RecordOut(RecordIn):
     id: int
     date: str
+    featured: bool = False
+
+
+class RecordFeatureIn(BaseModel):
+    """PUT .../records/{id}/feature 전용 바디 — 별점/메모 등 나머지
+    필드는 안 건드리고 이 플래그 하나만 켜고/끄는 데 씀."""
+
+    featured: bool
 
 
 class UploadOut(BaseModel):

@@ -140,6 +140,27 @@ def update_record(db: Session, room_id: int, record_id: int, data: dict) -> Opti
     return record
 
 
+def set_featured(db: Session, room_id: int, record_id: int, featured: bool) -> Optional[models.Record]:
+    """방 안에서 '이달의 작품'은 한 번에 최대 하나 — 새로 켜면 같은
+    방의 나머지 기록은 자동으로 꺼서 로비 액자에 걸릴 후보가 항상
+    하나 이하가 되게 함."""
+    record = (
+        db.query(models.Record)
+        .filter(models.Record.id == record_id, models.Record.room_id == room_id)
+        .first()
+    )
+    if record is None:
+        return None
+    if featured:
+        db.query(models.Record).filter(
+            models.Record.room_id == room_id, models.Record.id != record_id
+        ).update({models.Record.featured: False}, synchronize_session=False)
+    record.featured = featured
+    db.commit()
+    db.refresh(record)
+    return record
+
+
 def delete_record(db: Session, room_id: int, record_id: int) -> bool:
     record = (
         db.query(models.Record)

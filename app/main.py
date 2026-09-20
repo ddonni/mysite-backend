@@ -182,6 +182,14 @@ def update_record(record_id: int, body: schemas.RecordIn, room: models.Room = De
     return record
 
 
+@app.put("/api/rooms/{code}/records/{record_id}/feature", response_model=schemas.RecordOut)
+def feature_record(record_id: int, body: schemas.RecordFeatureIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
+    record = crud.set_featured(db, room.id, record_id, body.featured)
+    if record is None:
+        raise HTTPException(status_code=404, detail="record not found")
+    return record
+
+
 @app.delete("/api/rooms/{code}/records/{record_id}")
 def remove_record(record_id: int, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
     ok = crud.delete_record(db, room.id, record_id)

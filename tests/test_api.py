@@ -249,6 +249,36 @@ def test_delete_missing_record_is_404(room):
     assert resp.status_code == 404
 
 
+def test_feature_record_unsets_previous_featured(room):
+    headers = auth(room)
+    first = client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=headers).json()
+    second = client.post(
+        f"/api/rooms/{room['code']}/records", json=make_record(title="어린 왕자"), headers=headers
+    ).json()
+
+    resp = client.put(f"/api/rooms/{room['code']}/records/{first['id']}/feature", json={"featured": True}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["featured"] is True
+
+    resp = client.put(f"/api/rooms/{room['code']}/records/{second['id']}/feature", json={"featured": True}, headers=headers)
+    assert resp.status_code == 200
+
+    records = {r["id"]: r for r in client.get(f"/api/rooms/{room['code']}/records").json()}
+    assert records[first["id"]]["featured"] is False
+    assert records[second["id"]]["featured"] is True
+
+
+def test_feature_record_requires_owner_token(room):
+    created = client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=auth(room)).json()
+    resp = client.put(f"/api/rooms/{room['code']}/records/{created['id']}/feature", json={"featured": True})
+    assert resp.status_code == 403
+
+
+def test_feature_missing_record_is_404(room):
+    resp = client.put(f"/api/rooms/{room['code']}/records/999/feature", json={"featured": True}, headers=auth(room))
+    assert resp.status_code == 404
+
+
 def test_upload_photo_returns_s3_url(room, monkeypatch):
     async def fake_upload(file):
         return "https://fake-bucket.s3.ap-northeast-2.amazonaws.com/records/fake.jpg"
