@@ -48,6 +48,15 @@ def run_startup_migrations(engine: Engine) -> None:
             print("[migrations] adding records.featured column")
             conn.execute(text("ALTER TABLE records ADD COLUMN featured BOOLEAN NOT NULL DEFAULT false"))
 
+        if not _has_column(inspector, "rooms", "theme"):
+            print("[migrations] adding rooms.theme column")
+            conn.execute(text("ALTER TABLE rooms ADD COLUMN theme VARCHAR NOT NULL DEFAULT 'wood'"))
+
+        if not _has_column(inspector, "rooms", "google_sub"):
+            print("[migrations] adding rooms.google_sub column")
+            conn.execute(text("ALTER TABLE rooms ADD COLUMN google_sub VARCHAR"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_rooms_google_sub ON rooms (google_sub)"))
+
         pages_need_room = not _has_column(inspector, "pages", "room_id")
         records_need_room = "records" in inspector.get_table_names() and not _has_column(
             inspector, "records", "room_id"

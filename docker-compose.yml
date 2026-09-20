@@ -29,6 +29,9 @@ services:
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      # 구글 계정으로 내 방 복구(POST /api/auth/google) 테스트용 — 안
+      # 채워도 나머지 기능은 그대로 동작함(이 기능만 실패).
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     ports:
       - "8000:8000"
 

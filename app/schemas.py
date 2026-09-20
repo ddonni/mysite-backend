@@ -13,6 +13,34 @@ class RoomOut(BaseModel):
     token: str
 
 
+# The lobby's 3D scene picks its color palette from this — keep in sync
+# with THEMES in mysite's js/lobby/scene.js.
+ROOM_THEMES = ("wood", "night", "pastel")
+
+
+class RoomThemeIn(BaseModel):
+    theme: Literal[ROOM_THEMES]
+
+
+class GoogleAuthIn(BaseModel):
+    """id_token comes from Google Identity Services in the browser.
+    current_code/current_token are this browser's existing room (if it
+    has one) — sent along so that, the first time this Google account is
+    used, we know which room to link it to instead of creating a new one."""
+
+    id_token: str
+    current_code: Optional[str] = None
+    current_token: Optional[str] = None
+
+
+class GoogleAuthOut(BaseModel):
+    code: str
+    token: str
+    # True the first time a Google account gets linked to a room (so the
+    # frontend can tell "just connected" apart from "found your room").
+    linked_new: bool
+
+
 class Stroke(BaseModel):
     """One pen or eraser stroke, in the same compact shape the canvas
     stores it in: normalized (0..1) points so it renders correctly at any

@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from . import crud, models, schemas, storage
+from . import crud, google_auth, models, schemas, storage
 from .database import Base, SessionLocal, engine, get_db
 from .migrations import run_startup_migrations
 
@@ -123,7 +123,41 @@ def create_room(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/api/rooms/{code}")
 def read_room(room: models.Room = Depends(get_room)):
-    return {"code": room.code}
+    return {"code": room.code, "theme": room.theme}
+
+
+@app.put("/api/rooms/{code}/theme")
+def update_theme(body: schemas.RoomThemeIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
+    crud.set_theme(db, room, body.theme)
+    return {"theme": room.theme}
+
+
+@app.post("/api/auth/google", response_model=schemas.GoogleAuthOut)
+def google_auth_resolve(body: schemas.GoogleAuthIn, db: Session = Depends(get_db)):
+    """"내 방 복구" — 로그인 시스템이 아니라, 이 브라우저의 localStorage가
+    지워졌거나 새 기기일 때 구글 계정으로 원래 방의 token을 다시 받아오는
+    용도. 이 구글 계정이 이미 어떤 방에 연결돼 있으면 그 방의 code/token을
+    그대로 돌려주고(=복구), 아직 아무 방에도 연결 안 돼 있으면 요청에 실려
+    온 현재 방(current_code/current_token, 소유자 토큰으로 증명됨)에
+    이 계정을 새로 연결함. 어느 쪽도 안 되면(연결된 방도 없고, 넘어온
+    현재 방 정보도 없거나 틀림) 404."""
+    try:
+        claims = google_auth.verify_id_token(body.id_token)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid google token")
+    sub = claims["sub"]
+
+    linked = crud.get_room_by_google_sub(db, sub)
+    if linked is not None:
+        return {"code": linked.code, "token": linked.token, "linked_new": False}
+
+    if body.current_code and body.current_token:
+        current = crud.get_room_by_code(db, body.current_code)
+        if current is not None and current.token == body.current_token:
+            crud.set_google_sub(db, current, sub)
+            return {"code": current.code, "token": current.token, "linked_new": True}
+
+    raise HTTPException(status_code=404, detail="no room linked to this google account")
 
 
 @app.get("/api/rooms/{code}/meta", response_model=schemas.MetaOut)

@@ -42,6 +42,24 @@ def get_room_by_code(db: Session, code: str) -> Optional[models.Room]:
     return db.query(models.Room).filter(models.Room.code == code.upper()).first()
 
 
+def set_theme(db: Session, room: models.Room, theme: str) -> models.Room:
+    room.theme = theme
+    db.commit()
+    db.refresh(room)
+    return room
+
+
+def get_room_by_google_sub(db: Session, sub: str) -> Optional[models.Room]:
+    return db.query(models.Room).filter(models.Room.google_sub == sub).first()
+
+
+def set_google_sub(db: Session, room: models.Room, sub: str) -> models.Room:
+    room.google_sub = sub
+    db.commit()
+    db.refresh(room)
+    return room
+
+
 def get_count(db: Session, room_id: int) -> int:
     return db.query(func.count(models.Page.id)).filter(models.Page.room_id == room_id).scalar() or 0
 

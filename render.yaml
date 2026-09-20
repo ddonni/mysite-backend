@@ -22,6 +22,12 @@ services:
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
+      # 구글 계정으로 내 방 복구 기능용 OAuth client id — 비밀은 아니지만
+      # 값을 여기 커밋해두지 않고, Google Cloud Console에서 발급받은 뒤
+      # Render 대시보드 Environment 탭에서 채움 (js/shared/config.js의
+      # 프론트 client_id와 반드시 같은 값이어야 함).
+      - key: GOOGLE_CLIENT_ID
+        sync: false
 
 databases:
   - name: sketchbook-db

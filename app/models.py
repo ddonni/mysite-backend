@@ -18,6 +18,15 @@ class Room(Base):
     id = Column(Integer, primary_key=True, index=True)
     code = Column(String, unique=True, nullable=False, index=True)
     token = Column(String, unique=True, nullable=False)
+    # 로비 3D 씬의 색 팔레트 프리셋 이름(app.schemas.ROOM_THEMES) — 방
+    # 주인이 고름, 코드만 있으면 누구나 GET으로 볼 수 있는 비밀 아닌
+    # 값이라 owner_token 없이도 read_room에서 그대로 돌려줌.
+    theme = Column(String, nullable=False, default="wood")
+    # 이 방에 연결해둔 구글 계정의 안정적인 사용자 id(ID 토큰의 sub
+    # 클레임). 로그인 시스템이 있는 건 아니고, 브라우저 localStorage가
+    # 지워지거나 새 기기로 옮길 때 token을 다시 찾아오기 위한 용도라서
+    # 하나의 구글 계정은 최대 한 방에만 연결됨(unique). 대부분은 NULL.
+    google_sub = Column(String, unique=True, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     pages = relationship("Page", back_populates="room", cascade="all, delete-orphan")

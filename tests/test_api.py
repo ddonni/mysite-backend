@@ -73,7 +73,7 @@ def test_create_room_returns_code_and_token():
 def test_room_lookup_by_code(room):
     resp = client.get(f"/api/rooms/{room['code']}")
     assert resp.status_code == 200
-    assert resp.json() == {"code": room["code"]}
+    assert resp.json() == {"code": room["code"], "theme": "wood"}
 
 
 def test_unknown_room_code_is_404():
@@ -86,6 +86,23 @@ def test_room_creation_is_rate_limited_per_ip():
         assert client.post("/api/rooms").status_code == 200
     resp = client.post("/api/rooms")
     assert resp.status_code == 429
+
+
+def test_update_theme(room):
+    resp = client.put(f"/api/rooms/{room['code']}/theme", json={"theme": "night"}, headers=auth(room))
+    assert resp.status_code == 200
+    assert resp.json() == {"theme": "night"}
+    assert client.get(f"/api/rooms/{room['code']}").json()["theme"] == "night"
+
+
+def test_update_theme_requires_owner_token(room):
+    resp = client.put(f"/api/rooms/{room['code']}/theme", json={"theme": "night"})
+    assert resp.status_code == 403
+
+
+def test_update_theme_rejects_unknown_value(room):
+    resp = client.put(f"/api/rooms/{room['code']}/theme", json={"theme": "neon"}, headers=auth(room))
+    assert resp.status_code == 422
 
 
 # --- pages: read-only vs owner ---
@@ -300,3 +317,56 @@ def test_upload_photo_without_token_is_403(room):
         files={"file": ("photo.jpg", b"fake-bytes", "image/jpeg")},
     )
     assert resp.status_code == 403
+
+
+# --- google account link/recover (POST /api/auth/google) ---
+
+def fake_google_claims(sub="google-user-1"):
+    return {"sub": sub, "email": "test@example.com"}
+
+
+def test_google_auth_links_current_room_first_time(room, monkeypatch):
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+
+    resp = client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"code": room["code"], "token": room["token"], "linked_new": True}
+
+
+def test_google_auth_recovers_already_linked_room(room, monkeypatch):
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
+    })
+
+    # 새 기기 시나리오: current_code/current_token 없이 구글 계정만으로 복구.
+    resp = client.post("/api/auth/google", json={"id_token": "fake"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"code": room["code"], "token": room["token"], "linked_new": False}
+
+
+def test_google_auth_invalid_token_is_400(monkeypatch):
+    def raise_invalid(t):
+        raise ValueError("bad token")
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", raise_invalid)
+
+    resp = client.post("/api/auth/google", json={"id_token": "not-a-real-token"})
+    assert resp.status_code == 400
+
+
+def test_google_auth_no_link_and_no_current_room_is_404(monkeypatch):
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    resp = client.post("/api/auth/google", json={"id_token": "fake"})
+    assert resp.status_code == 404
+
+
+def test_google_auth_wrong_current_token_is_404(room, monkeypatch):
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    resp = client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": room["code"], "current_token": "not-the-real-token",
+    })
+    assert resp.status_code == 404

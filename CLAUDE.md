@@ -21,7 +21,11 @@
   **POST/PUT/DELETE는 `X-Room-Token` 헤더가 그 방의 진짜 token과
   일치해야만** 통과함(`main.py`의 `require_owner` 의존성). 이게 바로
   "남의 방은 보기만 가능, 내 방만 수정 가능"의 전부 — 별도의
-  로그인/세션은 없음.
+  로그인/세션은 없음. (예외적으로 `POST /api/auth/google`이 있는데,
+  이건 로그인 시스템이 아니라 "구글 계정 하나를 방 하나에 연결해서
+  브라우저가 바뀌어도 token을 되찾을 수 있게" 하는 보조 기능임 —
+  `rooms.google_sub`에 저장되고, code/token이 여전히 유일한 진짜
+  인증 수단이라는 점은 안 바뀜.)
 - `Page`/`Record`는 둘 다 `room_id`를 가지며, `Page`의
   `(room_id, page_number)`가 유니크 — 방마다 자기만의 1..count
   페이지 번호 체계를 가짐(예전엔 `page_number` 전역 유니크였음).
@@ -91,6 +95,11 @@ tests/test_api.py
   `/api/rooms/{code}/records`로 보내지 않는다.
 - `CORS_ORIGINS` 환경 변수로 허용 도메인 제어. 현재 값은 배포된 프론트
   주소(`https://ddonni.github.io`)로 좁혀져 있음.
+- `GOOGLE_CLIENT_ID` 환경 변수(선택)로 구글 계정 방 복구 기능을 검증함
+  — 비어 있으면 `google_auth.verify_id_token`이 실패해서 그 기능만
+  400으로 막히고 나머지는 평소대로 동작함. `mysite`의
+  `js/shared/config.js`에 있는 `GOOGLE_CLIENT_ID`와 반드시 같은 값이어야
+  함(둘 다 Google Cloud Console에서 발급한 같은 OAuth client id).
 - `migrations.py`는 프로덕션(Postgres)에서만 동작하고 SQLite(테스트)는
   즉시 스킵한다 — 테스트용 DB는 매번 `create_all()`로 처음부터 현재
   스키마로 만들어지기 때문에 보정할 게 없음. 이 파일은 프로덕션이
