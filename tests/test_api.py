@@ -370,3 +370,27 @@ def test_google_auth_wrong_current_token_is_404(room, monkeypatch):
         "id_token": "fake", "current_code": room["code"], "current_token": "not-the-real-token",
     })
     assert resp.status_code == 404
+
+
+# --- google link status (GET /api/rooms/{code}/google) ---
+
+def test_google_status_unlinked_by_default(room):
+    resp = client.get(f"/api/rooms/{room['code']}/google", headers=auth(room))
+    assert resp.status_code == 200
+    assert resp.json() == {"linked": False, "email": None}
+
+
+def test_google_status_shows_linked_email(room, monkeypatch):
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
+    })
+
+    resp = client.get(f"/api/rooms/{room['code']}/google", headers=auth(room))
+    assert resp.status_code == 200
+    assert resp.json() == {"linked": True, "email": "test@example.com"}
+
+
+def test_google_status_requires_owner_token(room):
+    resp = client.get(f"/api/rooms/{room['code']}/google")
+    assert resp.status_code == 403

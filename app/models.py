@@ -27,6 +27,9 @@ class Room(Base):
     # 지워지거나 새 기기로 옮길 때 token을 다시 찾아오기 위한 용도라서
     # 하나의 구글 계정은 최대 한 방에만 연결됨(unique). 대부분은 NULL.
     google_sub = Column(String, unique=True, nullable=True, index=True)
+    # 위 계정의 이메일 — 화면에 "어떤 계정이 연동됐는지" 보여주기 위한
+    # 표시용 값일 뿐, 조회/인증 어디에도 이 값 자체로는 안 씀(sub가 진짜 키).
+    google_email = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     pages = relationship("Page", back_populates="room", cascade="all, delete-orphan")

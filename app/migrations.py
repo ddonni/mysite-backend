@@ -57,6 +57,10 @@ def run_startup_migrations(engine: Engine) -> None:
             conn.execute(text("ALTER TABLE rooms ADD COLUMN google_sub VARCHAR"))
             conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_rooms_google_sub ON rooms (google_sub)"))
 
+        if not _has_column(inspector, "rooms", "google_email"):
+            print("[migrations] adding rooms.google_email column")
+            conn.execute(text("ALTER TABLE rooms ADD COLUMN google_email VARCHAR"))
+
         pages_need_room = not _has_column(inspector, "pages", "room_id")
         records_need_room = "records" in inspector.get_table_names() and not _has_column(
             inspector, "records", "room_id"

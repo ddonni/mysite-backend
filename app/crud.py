@@ -1,5 +1,4 @@
 import secrets
-import string
 from datetime import date
 from typing import Optional, Tuple
 
@@ -53,8 +52,9 @@ def get_room_by_google_sub(db: Session, sub: str) -> Optional[models.Room]:
     return db.query(models.Room).filter(models.Room.google_sub == sub).first()
 
 
-def set_google_sub(db: Session, room: models.Room, sub: str) -> models.Room:
+def set_google_sub(db: Session, room: models.Room, sub: str, email: Optional[str]) -> models.Room:
     room.google_sub = sub
+    room.google_email = email
     db.commit()
     db.refresh(room)
     return room
@@ -143,12 +143,19 @@ def create_record(db: Session, room_id: int, data: dict) -> models.Record:
     return record
 
 
-def update_record(db: Session, room_id: int, record_id: int, data: dict) -> Optional[models.Record]:
-    record = (
+def _get_record(db: Session, room_id: int, record_id: int) -> Optional[models.Record]:
+    # update_record/set_featured/delete_record 모두 "이 방 소유의 이 기록"을
+    # 찾는 걸로 시작함 — room_id를 필터에 같이 걸어서, URL의 record_id를 알아도
+    # 남의 방 기록은 절대 못 건드리게(스코핑) 함.
+    return (
         db.query(models.Record)
         .filter(models.Record.id == record_id, models.Record.room_id == room_id)
         .first()
     )
+
+
+def update_record(db: Session, room_id: int, record_id: int, data: dict) -> Optional[models.Record]:
+    record = _get_record(db, room_id, record_id)
     if record is None:
         return None
     for key, value in data.items():
@@ -162,11 +169,7 @@ def set_featured(db: Session, room_id: int, record_id: int, featured: bool) -> O
     """방 안에서 '이달의 작품'은 한 번에 최대 하나 — 새로 켜면 같은
     방의 나머지 기록은 자동으로 꺼서 로비 액자에 걸릴 후보가 항상
     하나 이하가 되게 함."""
-    record = (
-        db.query(models.Record)
-        .filter(models.Record.id == record_id, models.Record.room_id == room_id)
-        .first()
-    )
+    record = _get_record(db, room_id, record_id)
     if record is None:
         return None
     if featured:
@@ -180,11 +183,7 @@ def set_featured(db: Session, room_id: int, record_id: int, featured: bool) -> O
 
 
 def delete_record(db: Session, room_id: int, record_id: int) -> bool:
-    record = (
-        db.query(models.Record)
-        .filter(models.Record.id == record_id, models.Record.room_id == room_id)
-        .first()
-    )
+    record = _get_record(db, room_id, record_id)
     if record is None:
         return False
     db.delete(record)

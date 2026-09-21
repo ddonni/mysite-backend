@@ -5,13 +5,18 @@
 
 - **스케치북** (`sketchbook.html`) — 번호가 매겨진 페이지를 넘기며
   그리는 캔버스. 그림 저장/실시간 동기화에 REST API + WebSocket 사용.
-- **기록 보관소** (`library.html`) — 읽거나 본 책/애니/영화 기록. REST
-  API로 CRUD, 사진은 S3에 업로드하고 URL만 저장.
+- **기록 보관소** (`library.html`) — 읽거나 본 책/애니/영화/음악 기록.
+  REST API로 CRUD, 사진은 S3에 업로드하고 URL만 저장. 그중 하나를
+  방마다 하나뿐인 "이달의 작품"으로 표시할 수 있음(로비 액자에 걸림).
+- **로비** — 방마다 3D 씬 색 팔레트(`wood`/`night`/`pastel`)를 고를 수
+  있음.
 
 모든 데이터는 **방(room)** 단위로 나뉨 — 처음 방문하면 자동으로 방
 코드(6자리)와 비밀 토큰을 발급받고(로그인 없음), 그 코드를 아는
 사람은 누구나 방을 구경할 수 있지만(읽기 전용) 토큰을 가진 본인만
-그리거나 기록을 남길 수 있음.
+그리거나 기록을 남길 수 있음. 브라우저 localStorage가 지워지거나
+기기를 옮긴 경우, 구글 계정을 한 번 연결해두면 그 계정으로 다시
+로그인해서 토큰을 복구할 수 있음(로그인 시스템은 아님).
 
 ## 스택
 
@@ -59,6 +64,16 @@ rooms 기능을 처음 배포할 때는 `app/migrations.py`가 기동 시 한 �
    `AWS_SECRET_ACCESS_KEY` 네 값을 채워 넣기 (`render.yaml`에는
    `sync: false`로만 선언돼 있어 git에는 값이 올라가지 않음).
 
+구글 계정으로 방 복구 기능을 쓰려면 `GOOGLE_CLIENT_ID`도 필요함:
+
+1. Google Cloud Console에서 OAuth 2.0 클라이언트 ID(웹 애플리케이션)를
+   발급.
+2. Render 대시보드 → `sketchbook-api` → Environment 탭에서
+   `GOOGLE_CLIENT_ID` 값 채우기(이것도 `sync: false`라 git에는 안 올라감).
+3. `mysite` 레포의 `js/shared/config.js`에 있는 프론트엔드 client_id와
+   반드시 같은 값이어야 함.
+4. 안 채워도 나머지 기능은 그대로 동작함(`POST /api/auth/google`만 실패).
+
 ## 프론트엔드와 연결하기
 
 1. Render에 배포한 뒤, `CORS_ORIGINS` 환경 변수에 프론트엔드가 서비스되는
@@ -74,8 +89,9 @@ pip install -r requirements-dev.txt
 pytest -q
 ```
 
-`tests/test_api.py`는 페이지 저장/조회, 페이지 추가, 그리고 페이지 삭제 시
-뒤 페이지 번호들이 한 칸씩 당겨지는 로직을 검증.
+`tests/test_api.py`는 페이지 저장/조회, 페이지 추가, 페이지 삭제 시 뒤
+페이지 번호들이 한 칸씩 당겨지는 로직, 기록 보관소 CRUD/이달의 작품
+지정, 사진 업로드, 구글 계정 연동/복구를 검증.
 
 ## 페이지 삭제가 안전한 이유
 

@@ -154,10 +154,17 @@ def google_auth_resolve(body: schemas.GoogleAuthIn, db: Session = Depends(get_db
     if body.current_code and body.current_token:
         current = crud.get_room_by_code(db, body.current_code)
         if current is not None and current.token == body.current_token:
-            crud.set_google_sub(db, current, sub)
+            crud.set_google_sub(db, current, sub, claims.get("email"))
             return {"code": current.code, "token": current.token, "linked_new": True}
 
     raise HTTPException(status_code=404, detail="no room linked to this google account")
+
+
+@app.get("/api/rooms/{code}/google", response_model=schemas.GoogleStatusOut)
+def read_google_status(room: models.Room = Depends(require_owner)):
+    """방 화면에서 "구글 로그인" 버튼 대신 연동된 계정을 보여줄지 정하는 데
+    씀 — 이메일은 다른 사람에게 보일 이유가 없는 정보라 소유자만 조회 가능."""
+    return {"linked": room.google_sub is not None, "email": room.google_email}
 
 
 @app.get("/api/rooms/{code}/meta", response_model=schemas.MetaOut)

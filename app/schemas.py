@@ -41,6 +41,14 @@ class GoogleAuthOut(BaseModel):
     linked_new: bool
 
 
+class GoogleStatusOut(BaseModel):
+    """GET /api/rooms/{code}/google — lets the frontend swap the sign-in
+    button for "linked as <email>" once a room already has one linked."""
+
+    linked: bool
+    email: Optional[str] = None
+
+
 class Stroke(BaseModel):
     """One pen or eraser stroke, in the same compact shape the canvas
     stores it in: normalized (0..1) points so it renders correctly at any
