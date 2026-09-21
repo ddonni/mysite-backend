@@ -22,6 +22,9 @@ class Room(Base):
     # 주인이 고름, 코드만 있으면 누구나 GET으로 볼 수 있는 비밀 아닌
     # 값이라 owner_token 없이도 read_room에서 그대로 돌려줌.
     theme = Column(String, nullable=False, default="wood")
+    # 로비 제목에 "누구 방인지"로 보여줄 방 이름(최대 20자, 방 주인이 지음).
+    # 테마처럼 코드만 있으면 누구나 볼 수 있는 값이고, 안 지었으면 NULL.
+    name = Column(String, nullable=True)
     # 이 방에 연결해둔 구글 계정의 안정적인 사용자 id(ID 토큰의 sub
     # 클레임). 로그인 시스템이 있는 건 아니고, 브라우저 localStorage가
     # 지워지거나 새 기기로 옮길 때 token을 다시 찾아오기 위한 용도라서

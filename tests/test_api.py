@@ -73,7 +73,7 @@ def test_create_room_returns_code_and_token():
 def test_room_lookup_by_code(room):
     resp = client.get(f"/api/rooms/{room['code']}")
     assert resp.status_code == 200
-    assert resp.json() == {"code": room["code"], "theme": "wood"}
+    assert resp.json() == {"code": room["code"], "theme": "wood", "name": None}
 
 
 def test_unknown_room_code_is_404():
@@ -102,6 +102,32 @@ def test_update_theme_requires_owner_token(room):
 
 def test_update_theme_rejects_unknown_value(room):
     resp = client.put(f"/api/rooms/{room['code']}/theme", json={"theme": "neon"}, headers=auth(room))
+    assert resp.status_code == 422
+
+
+def test_update_name_is_trimmed_and_visible_to_visitors(room):
+    resp = client.put(f"/api/rooms/{room['code']}/name", json={"name": "  다은이네  "}, headers=auth(room))
+    assert resp.status_code == 200
+    assert resp.json() == {"name": "다은이네"}
+    # 이름은 코드만 있으면 누구나(토큰 없이) 볼 수 있는 공개 값
+    assert client.get(f"/api/rooms/{room['code']}").json()["name"] == "다은이네"
+
+
+def test_update_name_blank_clears_it(room):
+    client.put(f"/api/rooms/{room['code']}/name", json={"name": "임시"}, headers=auth(room))
+    resp = client.put(f"/api/rooms/{room['code']}/name", json={"name": "   "}, headers=auth(room))
+    assert resp.status_code == 200
+    assert resp.json() == {"name": None}
+    assert client.get(f"/api/rooms/{room['code']}").json()["name"] is None
+
+
+def test_update_name_requires_owner_token(room):
+    resp = client.put(f"/api/rooms/{room['code']}/name", json={"name": "몰래"})
+    assert resp.status_code == 403
+
+
+def test_update_name_rejects_over_20_chars(room):
+    resp = client.put(f"/api/rooms/{room['code']}/name", json={"name": "가" * 21}, headers=auth(room))
     assert resp.status_code == 422
 
 
@@ -394,3 +420,41 @@ def test_google_status_shows_linked_email(room, monkeypatch):
 def test_google_status_requires_owner_token(room):
     resp = client.get(f"/api/rooms/{room['code']}/google")
     assert resp.status_code == 403
+
+
+# --- google unlink (DELETE /api/rooms/{code}/google) ---
+
+def test_google_unlink_clears_the_link_and_stops_recovery(room, monkeypatch):
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
+    })
+
+    resp = client.delete(f"/api/rooms/{room['code']}/google", headers=auth(room))
+    assert resp.status_code == 200
+    assert resp.json() == {"linked": False, "email": None}
+    assert client.get(f"/api/rooms/{room['code']}/google", headers=auth(room)).json()["linked"] is False
+
+    # 해제 뒤엔 그 구글 계정만으로는 방을 되찾을 수 없음
+    assert client.post("/api/auth/google", json={"id_token": "fake"}).status_code == 404
+
+
+def test_google_unlink_requires_owner_token(room, monkeypatch):
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
+    })
+
+    assert client.delete(f"/api/rooms/{room['code']}/google").status_code == 403
+    assert client.get(f"/api/rooms/{room['code']}/google", headers=auth(room)).json()["linked"] is True
+
+
+def test_google_relink_after_unlink_works(room, monkeypatch):
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    link = {"id_token": "fake", "current_code": room["code"], "current_token": room["token"]}
+    client.post("/api/auth/google", json=link)
+    client.delete(f"/api/rooms/{room['code']}/google", headers=auth(room))
+
+    resp = client.post("/api/auth/google", json=link)
+    assert resp.status_code == 200
+    assert resp.json()["linked_new"] is True

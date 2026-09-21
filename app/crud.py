@@ -48,8 +48,23 @@ def set_theme(db: Session, room: models.Room, theme: str) -> models.Room:
     return room
 
 
+def set_name(db: Session, room: models.Room, name: str) -> models.Room:
+    room.name = name or None  # 빈 문자열은 "이름 없음"으로 저장
+    db.commit()
+    db.refresh(room)
+    return room
+
+
 def get_room_by_google_sub(db: Session, sub: str) -> Optional[models.Room]:
     return db.query(models.Room).filter(models.Room.google_sub == sub).first()
+
+
+def clear_google(db: Session, room: models.Room) -> models.Room:
+    room.google_sub = None
+    room.google_email = None
+    db.commit()
+    db.refresh(room)
+    return room
 
 
 def set_google_sub(db: Session, room: models.Room, sub: str, email: Optional[str]) -> models.Room:

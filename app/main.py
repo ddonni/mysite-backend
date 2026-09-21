@@ -123,13 +123,19 @@ def create_room(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/api/rooms/{code}")
 def read_room(room: models.Room = Depends(get_room)):
-    return {"code": room.code, "theme": room.theme}
+    return {"code": room.code, "theme": room.theme, "name": room.name}
 
 
 @app.put("/api/rooms/{code}/theme")
 def update_theme(body: schemas.RoomThemeIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
     crud.set_theme(db, room, body.theme)
     return {"theme": room.theme}
+
+
+@app.put("/api/rooms/{code}/name")
+def update_name(body: schemas.RoomNameIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
+    crud.set_name(db, room, body.name)
+    return {"name": room.name}
 
 
 @app.post("/api/auth/google", response_model=schemas.GoogleAuthOut)
@@ -165,6 +171,15 @@ def read_google_status(room: models.Room = Depends(require_owner)):
     """방 화면에서 "구글 로그인" 버튼 대신 연동된 계정을 보여줄지 정하는 데
     씀 — 이메일은 다른 사람에게 보일 이유가 없는 정보라 소유자만 조회 가능."""
     return {"linked": room.google_sub is not None, "email": room.google_email}
+
+
+@app.delete("/api/rooms/{code}/google", response_model=schemas.GoogleStatusOut)
+def unlink_google(room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
+    """연동 해제 — 이 방에 연결해둔 구글 계정 정보(sub/이메일)만 지움. 방의
+    code/token과 데이터는 그대로고, 해제 뒤엔 그 구글 계정으로 이 방을
+    되찾을 수 없음(같은 계정은 다시 연결하면 다시 쓸 수 있음)."""
+    crud.clear_google(db, room)
+    return {"linked": False, "email": None}
 
 
 @app.get("/api/rooms/{code}/meta", response_model=schemas.MetaOut)

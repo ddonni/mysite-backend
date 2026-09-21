@@ -1,6 +1,6 @@
-from typing import List, Literal, Optional
+from typing import Annotated, List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 
 
 class RoomOut(BaseModel):
@@ -20,6 +20,13 @@ ROOM_THEMES = ("wood", "night", "pastel")
 
 class RoomThemeIn(BaseModel):
     theme: Literal[ROOM_THEMES]
+
+
+class RoomNameIn(BaseModel):
+    """PUT .../name — 방 이름. 앞뒤 공백은 잘라낸 뒤 20자까지만 허용하고,
+    빈 문자열이면 이름을 지움(로비 제목이 다시 기본 "로비"로 돌아감)."""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)]
 
 
 class GoogleAuthIn(BaseModel):

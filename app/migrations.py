@@ -52,6 +52,10 @@ def run_startup_migrations(engine: Engine) -> None:
             print("[migrations] adding rooms.theme column")
             conn.execute(text("ALTER TABLE rooms ADD COLUMN theme VARCHAR NOT NULL DEFAULT 'wood'"))
 
+        if not _has_column(inspector, "rooms", "name"):
+            print("[migrations] adding rooms.name column")
+            conn.execute(text("ALTER TABLE rooms ADD COLUMN name VARCHAR"))
+
         if not _has_column(inspector, "rooms", "google_sub"):
             print("[migrations] adding rooms.google_sub column")
             conn.execute(text("ALTER TABLE rooms ADD COLUMN google_sub VARCHAR"))
