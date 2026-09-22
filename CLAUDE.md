@@ -57,6 +57,19 @@ docker compose up --build          # 로컬 실행 (API: localhost:8000, 문서:
 pip install -r requirements-dev.txt && pytest -q   # 테스트
 ```
 
+스키마를 바꿀 때(모델에 컬럼 추가 등)는 새 Alembic 리비전을 만든다:
+
+```bash
+docker compose up -d db            # 로컬 Postgres만 띄움
+DATABASE_URL=postgresql+psycopg2://sketchbook:sketchbook@localhost:5432/sketchbook \
+  alembic revision --autogenerate -m "설명"   # alembic/versions/에 새 파일 생성
+```
+
+생성된 파일은 리뷰 없이 그대로 커밋하지 말 것 — autogenerate가 의도치
+않은 변경(예: 무관한 인덱스 재생성)을 같이 잡아낼 수 있음. `main` push
+시 `run_startup_migrations`가 자동으로 `alembic upgrade head`를 실행하므로
+별도의 수동 배포 단계는 없음.
+
 ## 저장소 구조
 
 ```
@@ -66,7 +79,11 @@ app/
   schemas.py    # Pydantic 스키마
   crud.py       # DB 접근 로직, 방 코드/토큰 생성
   storage.py    # S3 사진 업로드
-  migrations.py # rooms 도입 전 프로덕션 DB를 위한 1회성 스키마 보정
+  migrations.py # 시작 시 Postgres에 alembic upgrade head를 실행 (SQLite는 스킵)
+alembic.ini
+alembic/
+  env.py        # DATABASE_URL 환경 변수로 접속, app.models을 읽어 autogenerate 지원
+  versions/     # 실제 스키마 변경 이력 — 여기 새 리비전을 추가하는 게 스키마를 바꾸는 유일한 방법
 tests/test_api.py
 ```
 
@@ -100,10 +117,19 @@ tests/test_api.py
   400으로 막히고 나머지는 평소대로 동작함. `mysite`의
   `js/shared/config.js`에 있는 `GOOGLE_CLIENT_ID`와 반드시 같은 값이어야
   함(둘 다 Google Cloud Console에서 발급한 같은 OAuth client id).
-- `migrations.py`는 프로덕션(Postgres)에서만 동작하고 SQLite(테스트)는
-  즉시 스킵한다 — 테스트용 DB는 매번 `create_all()`로 처음부터 현재
-  스키마로 만들어지기 때문에 보정할 게 없음. 이 파일은 프로덕션이
-  rooms 이전 스키마를 완전히 벗어난 뒤(=확인 후)에는 삭제해도 됨.
+- **스키마 변경은 전부 Alembic 리비전으로 한다** (`alembic/versions/`).
+  `main.py`의 lifespan이 Postgres일 때 `migrations.py`를 통해 시작 시마다
+  `alembic upgrade head`를 실행함 — 예전처럼 `app/migrations.py`에
+  `ALTER TABLE`을 손으로 추가하지 않음. SQLite(테스트)는 매번
+  `Base.metadata.create_all()`로 현재 모델 그대로 스키마를 새로 만들기
+  때문에 이 과정을 건너뜀(이력이 필요 없는 일회용 DB라서).
+  `migrations.py`의 `_BASELINE_REVISION`은 Alembic 도입 전 마지막까지
+  손으로 쌓아온 스키마와 정확히 같은 첫 리비전을 가리킴 — 프로덕션처럼
+  이미 그 스키마를 갖고 있지만 `alembic_version` 테이블이 아직 없는
+  DB를 만나면, 그 리비전의 `CREATE TABLE`을 다시 실행하는 대신
+  `alembic stamp`로 "이미 여기 와 있다"고 기록만 하고 넘어간다(Docker로
+  이 전환 자체를 실제 재현해 검증함). **이 상수는 절대 바꾸지 말 것** —
+  바뀌면 이미 배포된 프로덕션 DB가 엉뚱한 리비전으로 스탬프됨.
 
 ## 관련 저장소
 

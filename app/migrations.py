@@ -1,106 +1,64 @@
-"""One-time, idempotent fixup for the pre-rooms production database.
+"""Runs Alembic migrations against Postgres at startup.
 
-This project has no migration framework (no Alembic) — `Base.metadata.
-create_all()` only creates tables that don't exist yet, it never alters
-an existing one. Before rooms existed, `pages`/`records` had no room_id
-column at all, so on a brand-new database create_all() already produces
-the current schema (room_id NOT NULL, composite unique constraint) and
-every check below is a no-op. On the one database that predates rooms
-(production), this backfills a single "legacy" room to own the
-pre-existing rows, then tightens the schema to match the models.
+This project has no separate deploy step for schema changes — main.py's
+lifespan calls run_startup_migrations() every time the app boots, so a
+`git push` to main is enough: Render rebuilds the image and the new
+revision(s) under alembic/versions/ get applied before the app starts
+serving traffic.
 
-Safe to run on every startup: each step first checks whether it's
-already done.
+Before this, schema changes were hand-written idempotent ALTER TABLE
+statements in this same file (see git history) — that didn't scale past a
+handful of columns and, on SQLite (tests), was a no-op anyway since
+`Base.metadata.create_all()` always builds the current schema from
+scratch there. Alembic replaces that hand-rolled approach for Postgres;
+SQLite still just uses `create_all()` (see main.py's lifespan) since a
+throwaway test database has no history to migrate.
+
+One-time wrinkle: the very first Alembic revision (_BASELINE_REVISION)
+describes the schema exactly as it already existed in production (every
+column every earlier hand-written migration had added). A database that
+already has that schema but no `alembic_version` table yet — i.e.
+production, the first time this runs — gets `alembic stamp` instead of
+`alembic upgrade`: stamp just records "this database is at revision X"
+without re-running X's `CREATE TABLE` calls (which would fail against
+tables that already exist). Everything after that first stamp is a normal
+`alembic upgrade head`.
 """
-from sqlalchemy import inspect, text
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
 
-from .crud import _CODE_ALPHABET, _CODE_LENGTH
-import secrets
+# The first revision under alembic/versions/ — matches the schema that
+# `Base.metadata.create_all()` + the old hand-written migrations already
+# converged production to. Never change this constant after the first
+# deploy; it only ever describes "day one" of Alembic history here.
+_BASELINE_REVISION = "e7c3ca122668"
 
 
-def _has_column(inspector, table: str, column: str) -> bool:
-    return any(c["name"] == column for c in inspector.get_columns(table))
-
-
-def _unique_index_on(inspector, table: str, columns: list) -> str | None:
-    for idx in inspector.get_indexes(table):
-        if idx.get("unique") and idx.get("column_names") == columns:
-            return idx["name"]
-    for uc in inspector.get_unique_constraints(table):
-        if uc.get("column_names") == columns:
-            return uc["name"]
-    return None
+def _alembic_config() -> Config:
+    repo_root = Path(__file__).resolve().parent.parent
+    return Config(str(repo_root / "alembic.ini"))
 
 
 def run_startup_migrations(engine: Engine) -> None:
     if engine.dialect.name != "postgresql":
-        # SQLite (tests, local quick-start) always gets the current
-        # schema straight from create_all() — nothing to backfill.
+        # SQLite (tests, quick local runs without docker-compose) always
+        # gets the current schema straight from create_all() in main.py's
+        # lifespan — a throwaway database has no history to migrate.
         return
 
-    with engine.begin() as conn:
+    cfg = _alembic_config()
+    with engine.connect() as conn:
         inspector = inspect(conn)
-        if "pages" not in inspector.get_table_names():
-            return  # brand-new database; create_all() already built the current schema
+        has_version_table = "alembic_version" in inspector.get_table_names()
+        has_app_tables = "rooms" in inspector.get_table_names()
 
-        if "records" in inspector.get_table_names() and not _has_column(inspector, "records", "featured"):
-            print("[migrations] adding records.featured column")
-            conn.execute(text("ALTER TABLE records ADD COLUMN featured BOOLEAN NOT NULL DEFAULT false"))
+    if not has_version_table and has_app_tables:
+        print(f"[migrations] pre-Alembic database detected - stamping it at {_BASELINE_REVISION} "
+              "instead of re-running that revision's CREATE TABLE calls")
+        command.stamp(cfg, _BASELINE_REVISION)
 
-        if not _has_column(inspector, "rooms", "theme"):
-            print("[migrations] adding rooms.theme column")
-            conn.execute(text("ALTER TABLE rooms ADD COLUMN theme VARCHAR NOT NULL DEFAULT 'wood'"))
-
-        if not _has_column(inspector, "rooms", "name"):
-            print("[migrations] adding rooms.name column")
-            conn.execute(text("ALTER TABLE rooms ADD COLUMN name VARCHAR"))
-
-        if not _has_column(inspector, "rooms", "google_sub"):
-            print("[migrations] adding rooms.google_sub column")
-            conn.execute(text("ALTER TABLE rooms ADD COLUMN google_sub VARCHAR"))
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_rooms_google_sub ON rooms (google_sub)"))
-
-        if not _has_column(inspector, "rooms", "google_email"):
-            print("[migrations] adding rooms.google_email column")
-            conn.execute(text("ALTER TABLE rooms ADD COLUMN google_email VARCHAR"))
-
-        pages_need_room = not _has_column(inspector, "pages", "room_id")
-        records_need_room = "records" in inspector.get_table_names() and not _has_column(
-            inspector, "records", "room_id"
-        )
-        if not pages_need_room and not records_need_room:
-            return
-
-        print("[migrations] backfilling legacy room for pre-rooms data")
-
-        legacy_room_id = conn.execute(text("SELECT id FROM rooms ORDER BY id LIMIT 1")).scalar()
-        if legacy_room_id is None:
-            code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
-            token = secrets.token_urlsafe(24)
-            legacy_room_id = conn.execute(
-                text("INSERT INTO rooms (code, token, created_at) VALUES (:code, :token, now()) RETURNING id"),
-                {"code": code, "token": token},
-            ).scalar()
-            print(f"[migrations] created legacy room code={code} token={token} — "
-                  "give this to whoever owned the pre-rooms data so they can claim it")
-
-        if pages_need_room:
-            conn.execute(text("ALTER TABLE pages ADD COLUMN room_id INTEGER"))
-            conn.execute(text("UPDATE pages SET room_id = :rid WHERE room_id IS NULL"), {"rid": legacy_room_id})
-            conn.execute(text("ALTER TABLE pages ALTER COLUMN room_id SET NOT NULL"))
-
-            old_index = _unique_index_on(inspect(conn), "pages", ["page_number"])
-            if old_index:
-                conn.execute(text(f'DROP INDEX IF EXISTS "{old_index}"'))
-                conn.execute(text(f'ALTER TABLE pages DROP CONSTRAINT IF EXISTS "{old_index}"'))
-            conn.execute(text(
-                "ALTER TABLE pages ADD CONSTRAINT uq_pages_room_page_number UNIQUE (room_id, page_number)"
-            ))
-
-        if records_need_room:
-            conn.execute(text("ALTER TABLE records ADD COLUMN room_id INTEGER"))
-            conn.execute(text("UPDATE records SET room_id = :rid WHERE room_id IS NULL"), {"rid": legacy_room_id})
-            conn.execute(text("ALTER TABLE records ALTER COLUMN room_id SET NOT NULL"))
-
-        print("[migrations] done")
+    command.upgrade(cfg, "head")

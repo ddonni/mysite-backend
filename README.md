@@ -24,6 +24,8 @@
   페이지별 실시간 브로드캐스트용 WebSocket(`/ws/rooms/{code}/pages/{n}`).
 - **PostgreSQL** — SQLAlchemy ORM으로 접근. `DATABASE_URL` 환경 변수만
   바꾸면 동일한 코드로 로컬 테스트용 SQLite도 그대로 동작(테스트가 이 방식 사용).
+- **Alembic** — Postgres 스키마 변경 이력 관리. 기동할 때마다 자동으로
+  최신 리비전까지 적용됨(SQLite 테스트는 매번 새로 만들어서 필요 없음).
 - **S3(boto3)** — 기록 보관소 사진 저장소. `POST /api/uploads`가 파일을
   받아 S3에 올리고 URL을 돌려줌.
 - **Docker + docker-compose** — API 컨테이너와 PostgreSQL 컨테이너를 한 번에 실행.
@@ -48,10 +50,18 @@ Blueprint. Render 대시보드에서 "New +" → "Blueprint"로 이 GitHub 레�
 연결하면 두 서비스가 자동으로 생성되고, 이후 `main`에 push할 때마다
 자동 배포됨.
 
-rooms 기능을 처음 배포할 때는 `app/migrations.py`가 기동 시 한 번
-자동으로 실행돼서, rooms 도입 이전에 만들어진 기존 페이지/기록을
-"legacy" 방 하나에 몰아넣고 스키마를 현재 모델에 맞게 보정함 — 별도
-수동 작업 불필요 (자세한 내용은 그 파일의 docstring 참고).
+스키마 변경은 [Alembic](https://alembic.sqlalchemy.org/)으로 관리함
+(`alembic/versions/`). 기동할 때마다 `app/migrations.py`가 자동으로
+`alembic upgrade head`를 실행하므로, 새 리비전을 추가해서 push하면
+그걸로 끝 — 별도 수동 배포 단계 없음. 새 컬럼 등을 추가할 땐:
+
+```bash
+docker compose up -d db
+DATABASE_URL=postgresql+psycopg2://sketchbook:sketchbook@localhost:5432/sketchbook \
+  alembic revision --autogenerate -m "무엇을 바꿨는지"
+```
+
+으로 리비전 파일을 만들고, 생성된 내용을 검토한 뒤 커밋함.
 
 기록 보관소의 사진 업로드를 쓰려면 S3 버킷도 하나 필요함:
 

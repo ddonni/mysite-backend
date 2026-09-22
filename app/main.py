@@ -14,8 +14,15 @@ from .migrations import run_startup_migrations
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    run_startup_migrations(engine)
+    if engine.dialect.name == "postgresql":
+        # Alembic owns the Postgres schema end to end (see migrations.py) —
+        # including creating tables on a brand-new database, which used to
+        # be create_all()'s job.
+        run_startup_migrations(engine)
+    else:
+        # SQLite (tests, quick local runs) has no migration history to
+        # replay — just build the current schema straight from the models.
+        Base.metadata.create_all(bind=engine)
     yield
 
 
