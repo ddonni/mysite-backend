@@ -52,13 +52,16 @@ class Record(Base):
     id = Column(Integer, primary_key=True, index=True)
     room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
     cat = Column(String, nullable=False, index=True)
-    title = Column(String, nullable=False)
+    # food(냉장고) 기록은 제목이 없어도 됨 — 사진이 핵심이라서. 다른
+    # 카테고리는 여전히 프론트엔드가 제목 입력을 강제함(스키마 레벨이
+    # 아니라 modal.js의 validation).
+    title = Column(String, nullable=True)
     creator = Column(String, nullable=True)
     rating = Column(Float, nullable=False, default=0)
     memo = Column(String, nullable=True)
     photo_url = Column(String, nullable=True)
     date = Column(String, nullable=False)
-    # 방마다 딱 하나만 "이달의 작품"으로 켜져 있음(로비 액자에 걸림) —
+    # 방마다 딱 하나만 "인생작품"으로 켜져 있음(로비 액자에 걸림) —
     # crud.set_featured가 새로 켤 때 같은 방의 나머지를 자동으로 끔.
     featured = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
