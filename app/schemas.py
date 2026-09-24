@@ -95,25 +95,14 @@ class DeleteOut(BaseModel):
 class RecordIn(BaseModel):
     """One 'watched/read it' log entry. photo_url comes from POST
     /api/uploads — the client uploads the photo first, then sends the
-    returned URL along with the rest of the fields.
+    returned URL along with the rest of the fields."""
 
-    title is optional because "food" entries (the fridge in the lobby)
-    don't need one — the photo is the point. The other categories still
-    always send a title; the frontend enforces that, not this schema.
-
-    date is normally left unset and the server fills in today's date
-    (crud.create_record) — it exists here only so the fridge's "먹은
-    날짜" field can backdate an entry (e.g. logging yesterday's lunch).
-    On update, an unset/empty date leaves the record's existing date
-    alone rather than clearing it (see crud.update_record)."""
-
-    cat: Literal["book", "anime", "movie", "music", "food"]
-    title: Optional[str] = None
+    cat: Literal["book", "anime", "movie", "music"]
+    title: str
     creator: Optional[str] = None
     rating: float = 0
     memo: Optional[str] = None
     photo_url: Optional[str] = None
-    date: Optional[str] = None
 
 
 class RecordOut(RecordIn):

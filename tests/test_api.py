@@ -317,49 +317,15 @@ def test_feature_record_requires_owner_token(room):
     assert resp.status_code == 403
 
 
-# --- food (냉장고) ---
-
-def test_food_record_without_title_defaults_date_to_today(room):
-    # 냉장고 기록은 제목 없이도 만들어져야 하고(사진이 핵심), date를
-    # 안 보내면 서버가 오늘 날짜를 채워야 함.
-    resp = client.post(
-        f"/api/rooms/{room['code']}/records",
-        json=make_record(cat="food", title=None, photo_url="https://example.com/lunch.jpg"),
-        headers=auth(room),
-    )
-    assert resp.status_code == 200
-    created = resp.json()
-    assert created["title"] is None
-    assert created["date"]  # 오늘 날짜로 자동 채워짐
+def test_unknown_category_is_rejected(room):
+    # 음식(food) 카테고리는 없어졌음 — 예전 프론트가 보내도 저장되면 안 됨.
+    resp = client.post(f"/api/rooms/{room['code']}/records", json=make_record(cat="food"), headers=auth(room))
+    assert resp.status_code == 422
 
 
-def test_food_record_can_backdate(room):
-    headers = auth(room)
-    created = client.post(
-        f"/api/rooms/{room['code']}/records",
-        json=make_record(cat="food", title=None, date="2024-01-05"),
-        headers=headers,
-    ).json()
-    assert created["date"] == "2024-01-05"
-
-
-def test_updating_a_record_without_date_keeps_its_existing_date(room):
-    # 다른 카테고리(책/애니/영화/음악)의 수정 폼에는 날짜 입력칸이 없어서
-    # date=None을 그대로 보냄 — 그게 기존 날짜를 지워버리면 안 됨.
-    headers = auth(room)
-    created = client.post(
-        f"/api/rooms/{room['code']}/records",
-        json=make_record(cat="food", title=None, date="2024-01-05"),
-        headers=headers,
-    ).json()
-
-    resp = client.put(
-        f"/api/rooms/{room['code']}/records/{created['id']}",
-        json=make_record(cat="food", title=None, memo="다시 먹고 싶다"),
-        headers=headers,
-    )
-    assert resp.status_code == 200
-    assert resp.json()["date"] == "2024-01-05"
+def test_record_title_is_required(room):
+    resp = client.post(f"/api/rooms/{room['code']}/records", json=make_record(title=None), headers=auth(room))
+    assert resp.status_code == 422
 
 
 def test_feature_missing_record_is_404(room):

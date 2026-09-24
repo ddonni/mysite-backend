@@ -52,10 +52,7 @@ class Record(Base):
     id = Column(Integer, primary_key=True, index=True)
     room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
     cat = Column(String, nullable=False, index=True)
-    # food(냉장고) 기록은 제목이 없어도 됨 — 사진이 핵심이라서. 다른
-    # 카테고리는 여전히 프론트엔드가 제목 입력을 강제함(스키마 레벨이
-    # 아니라 modal.js의 validation).
-    title = Column(String, nullable=True)
+    title = Column(String, nullable=False)
     creator = Column(String, nullable=True)
     rating = Column(Float, nullable=False, default=0)
     memo = Column(String, nullable=True)

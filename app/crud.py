@@ -151,11 +151,7 @@ def list_records(db: Session, room_id: int, cat: Optional[str] = None) -> list:
 
 
 def create_record(db: Session, room_id: int, data: dict) -> models.Record:
-    # data["date"] is normally None (only the food/fridge form ever sets
-    # it, to backdate an entry) — fall back to today whenever it's absent.
-    data = dict(data)
-    record_date = data.pop("date", None) or date.today().isoformat()
-    record = models.Record(**data, room_id=room_id, date=record_date)
+    record = models.Record(**data, room_id=room_id, date=date.today().isoformat())
     db.add(record)
     db.commit()
     db.refresh(record)
@@ -177,15 +173,8 @@ def update_record(db: Session, room_id: int, record_id: int, data: dict) -> Opti
     record = _get_record(db, room_id, record_id)
     if record is None:
         return None
-    # date is popped out and only applied if truthy — every other category's
-    # edit form has no date field and always sends date=None, which must
-    # leave the original date alone instead of blanking it out.
-    data = dict(data)
-    new_date = data.pop("date", None)
     for key, value in data.items():
         setattr(record, key, value)
-    if new_date:
-        record.date = new_date
     db.commit()
     db.refresh(record)
     return record
