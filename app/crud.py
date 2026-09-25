@@ -180,17 +180,30 @@ def update_record(db: Session, room_id: int, record_id: int, data: dict) -> Opti
     return record
 
 
+# 로비에서 카테고리마다 대표작 자리가 3개씩 있음(책장 위 액자 3개, 영화
+# 큰 포스터 3장, 애니 진열장 윗칸 스탠드 3개) — 그 자리 수와 맞춤.
+FEATURED_PER_CAT = 3
+
+
+class FeaturedLimitError(Exception):
+    """이 카테고리의 대표작이 이미 FEATURED_PER_CAT개 켜져 있음."""
+
+
 def set_featured(db: Session, room_id: int, record_id: int, featured: bool) -> Optional[models.Record]:
-    """방 안에서 '인생작품'은 한 번에 최대 하나 — 새로 켜면 같은
-    방의 나머지 기록은 자동으로 꺼서 로비 액자에 걸릴 후보가 항상
-    하나 이하가 되게 함."""
+    """대표작은 방 안에서 카테고리마다 최대 FEATURED_PER_CAT개. 이미 꽉 찬
+    카테고리에 하나 더 켜려고 하면, 다른 걸 몰래 끄는 대신
+    FeaturedLimitError를 던져서 사용자가 직접 하나를 해제하게 함."""
     record = _get_record(db, room_id, record_id)
     if record is None:
         return None
-    if featured:
-        db.query(models.Record).filter(
-            models.Record.room_id == room_id, models.Record.id != record_id
-        ).update({models.Record.featured: False}, synchronize_session=False)
+    if featured and not record.featured:
+        count = (
+            db.query(func.count(models.Record.id))
+            .filter(models.Record.room_id == room_id, models.Record.cat == record.cat, models.Record.featured.is_(True))
+            .scalar()
+        )
+        if count >= FEATURED_PER_CAT:
+            raise FeaturedLimitError()
     record.featured = featured
     db.commit()
     db.refresh(record)

@@ -58,8 +58,8 @@ class Record(Base):
     memo = Column(String, nullable=True)
     photo_url = Column(String, nullable=True)
     date = Column(String, nullable=False)
-    # 방마다 딱 하나만 "인생작품"으로 켜져 있음(로비 액자에 걸림) —
-    # crud.set_featured가 새로 켤 때 같은 방의 나머지를 자동으로 끔.
+    # "대표작" 표시 — 방 안에서 카테고리마다 최대 3개(crud.FEATURED_PER_CAT)
+    # 까지 켤 수 있고, 로비의 각 카테고리 가구 맨 앞자리에 걸림.
     featured = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

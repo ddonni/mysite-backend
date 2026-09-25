@@ -247,7 +247,10 @@ def update_record(record_id: int, body: schemas.RecordIn, room: models.Room = De
 
 @app.put("/api/rooms/{code}/records/{record_id}/feature", response_model=schemas.RecordOut)
 def feature_record(record_id: int, body: schemas.RecordFeatureIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
-    record = crud.set_featured(db, room.id, record_id, body.featured)
+    try:
+        record = crud.set_featured(db, room.id, record_id, body.featured)
+    except crud.FeaturedLimitError:
+        raise HTTPException(status_code=400, detail="featured_limit")
     if record is None:
         raise HTTPException(status_code=404, detail="record not found")
     return record

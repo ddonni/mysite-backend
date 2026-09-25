@@ -292,23 +292,46 @@ def test_delete_missing_record_is_404(room):
     assert resp.status_code == 404
 
 
-def test_feature_record_unsets_previous_featured(room):
-    headers = auth(room)
-    first = client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=headers).json()
-    second = client.post(
-        f"/api/rooms/{room['code']}/records", json=make_record(title="어린 왕자"), headers=headers
-    ).json()
+def _feature(room, record_id, featured=True):
+    return client.put(
+        f"/api/rooms/{room['code']}/records/{record_id}/feature", json={"featured": featured}, headers=auth(room)
+    )
 
-    resp = client.put(f"/api/rooms/{room['code']}/records/{first['id']}/feature", json={"featured": True}, headers=headers)
-    assert resp.status_code == 200
-    assert resp.json()["featured"] is True
 
-    resp = client.put(f"/api/rooms/{room['code']}/records/{second['id']}/feature", json={"featured": True}, headers=headers)
-    assert resp.status_code == 200
+def _create(room, **overrides):
+    return client.post(f"/api/rooms/{room['code']}/records", json=make_record(**overrides), headers=auth(room)).json()
 
+
+def test_feature_up_to_three_per_category(room):
+    books = [_create(room, title=f"책{i}") for i in range(4)]
+    for b in books[:3]:
+        resp = _feature(room, b["id"])
+        assert resp.status_code == 200
+        assert resp.json()["featured"] is True
+
+    # 4번째는 다른 걸 몰래 끄지 않고 거절함 — 앞의 셋은 그대로 켜져 있어야 함.
+    resp = _feature(room, books[3]["id"])
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "featured_limit"
     records = {r["id"]: r for r in client.get(f"/api/rooms/{room['code']}/records").json()}
-    assert records[first["id"]]["featured"] is False
-    assert records[second["id"]]["featured"] is True
+    assert [records[b["id"]]["featured"] for b in books] == [True, True, True, False]
+
+
+def test_feature_limit_is_per_category(room):
+    for i in range(3):
+        _feature(room, _create(room, title=f"책{i}")["id"])
+    movie = _create(room, cat="movie", title="기생충")
+    assert _feature(room, movie["id"]).status_code == 200
+
+
+def test_unfeature_frees_a_slot_and_refeaturing_is_not_counted_twice(room):
+    books = [_create(room, title=f"책{i}") for i in range(4)]
+    for b in books[:3]:
+        _feature(room, b["id"])
+    # 이미 켜진 걸 다시 켜는 건 개수를 늘리지 않음.
+    assert _feature(room, books[0]["id"]).status_code == 200
+    assert _feature(room, books[0]["id"], False).status_code == 200
+    assert _feature(room, books[3]["id"]).status_code == 200
 
 
 def test_feature_record_requires_owner_token(room):
