@@ -58,8 +58,9 @@ class Record(Base):
     memo = Column(String, nullable=True)
     photo_url = Column(String, nullable=True)
     date = Column(String, nullable=False)
-    # "대표작" 표시 — 방 안에서 카테고리마다 최대 3개(crud.FEATURED_PER_CAT)
-    # 까지 켤 수 있고, 로비의 각 카테고리 가구 맨 앞자리에 걸림.
+    # "인생작" 표시(화면에선 인생책/인생애니/인생영화/최애음악) — 방 안에서
+    # 카테고리마다 최대 3개(crud.FEATURED_PER_CAT)까지 켤 수 있고, 로비의 각
+    # 카테고리 가구 맨 앞자리에 걸림.
     featured = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

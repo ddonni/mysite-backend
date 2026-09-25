@@ -101,7 +101,7 @@ tests/test_api.py
   `"page not found"`, `DELETE`의 404는 `"not_found"`, 마지막 페이지
   삭제 시도는 400 `"last_page"`, 방 코드 자체가 없으면 404
   `"room not found"`, 토큰이 없거나 틀리면 403 `"not room owner"`,
-  대표작(`PUT .../records/{id}/feature`)을 한 카테고리에 3개 넘게 켜려고
+  인생작(`PUT .../records/{id}/feature`)을 한 카테고리에 3개 넘게 켜려고
   하면 400 `"featured_limit"`.
   이 문자열을 바꾸면 `mysite`의 프론트 코드도 같이 고쳐야 함.
 - `PUT /api/rooms/{code}/pages/{n}`은 부분 수정이 아니라 해당 페이지의
