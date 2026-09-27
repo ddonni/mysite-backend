@@ -1,4 +1,5 @@
 .env
+.env.migrate
 __pycache__/
 *.pyc
 *.db

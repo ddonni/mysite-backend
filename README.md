@@ -46,10 +46,14 @@ docker compose up --build
 
 ## 배포 (Render)
 
-`render.yaml`이 API 서비스 + PostgreSQL DB를 함께 정의해둔 Render
-Blueprint. Render 대시보드에서 "New +" → "Blueprint"로 이 GitHub 레포를
-연결하면 두 서비스가 자동으로 생성되고, 이후 `main`에 push할 때마다
-자동 배포됨.
+`render.yaml`이 API 서비스를 정의해둔 Render Blueprint. Render
+대시보드에서 "New +" → "Blueprint"로 이 GitHub 레포를 연결하면 서비스가
+자동으로 생성되고, 이후 `main`에 push할 때마다 자동 배포됨.
+
+DB는 [Neon](https://neon.tech)의 무료 PostgreSQL을 씀(Render 무료 DB는
+30일 뒤 만료돼서 옮김). Neon 대시보드의 연결 주소에서 호스트의 `-pooler`를
+뺀 직접 연결 주소(`...?sslmode=require`)를 Render 대시보드 →
+`sketchbook-api` → Environment 탭의 `DATABASE_URL`에 넣으면 됨.
 
 스키마 변경은 [Alembic](https://alembic.sqlalchemy.org/)으로 관리함
 (`alembic/versions/`). 기동할 때마다 `app/migrations.py`가 자동으로

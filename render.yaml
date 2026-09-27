@@ -6,10 +6,12 @@ services:
     plan: free
     autoDeploy: true
     envVars:
+      # DB는 Neon(무료, 만료 없음)의 PostgreSQL — 연결 주소(비밀번호 포함)는
+      # 여기 커밋하지 않고 Render 대시보드 Environment 탭에서 직접 넣음.
+      # (2026-09-27에 Render 무료 DB에서 옮김. 풀러 없는 직접 연결 주소 +
+      # ?sslmode=require.)
       - key: DATABASE_URL
-        fromDatabase:
-          name: sketchbook-db
-          property: connectionString
+        sync: false
       - key: CORS_ORIGINS
         value: "https://ddonni.github.io"
       # S3 credentials/bucket aren't tracked here — set these directly in
@@ -29,6 +31,8 @@ services:
       - key: GOOGLE_CLIENT_ID
         sync: false
 
+# 예전 Render 무료 DB — 이제 서버는 안 씀(위 DATABASE_URL 참고). 무료 기간이
+# 끝나는 2026-10-15 무렵까지 되돌릴 수 있는 백업으로만 남겨둠. 그 뒤 이 블록을 지움.
 databases:
   - name: sketchbook-db
     plan: free
