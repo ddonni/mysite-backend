@@ -1,5 +1,5 @@
 import secrets
-from datetime import date
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from sqlalchemy import func
@@ -150,8 +150,18 @@ def list_records(db: Session, room_id: int, cat: Optional[str] = None) -> list:
     return q.order_by(models.Record.date.desc(), models.Record.id.desc()).all()
 
 
+# 기록 날짜는 "사용자가 사는 곳의 오늘" — 서버(Render)는 UTC라 date.today()를
+# 쓰면 한국 시간 0~9시에 남긴 기록이 어제 날짜로 찍혔음. 한국은 서머타임이
+# 없어서 고정 +9시간이면 충분함(tzdata 패키지 없이도 동작).
+KST = timezone(timedelta(hours=9))
+
+
+def today_kst() -> str:
+    return datetime.now(KST).date().isoformat()
+
+
 def create_record(db: Session, room_id: int, data: dict) -> models.Record:
-    record = models.Record(**data, room_id=room_id, date=date.today().isoformat())
+    record = models.Record(**data, room_id=room_id, date=today_kst())
     db.add(record)
     db.commit()
     db.refresh(record)

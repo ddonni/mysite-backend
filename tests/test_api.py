@@ -3,6 +3,7 @@ same SQLAlchemy code path, no database server needed. This is what CI runs
 on every push.
 """
 import os
+from datetime import datetime, timedelta, timezone
 
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 
@@ -10,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database import Base, engine
-from app.main import ROOM_CREATE_LIMIT, _room_creations, app
+from app.main import ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW, _room_creations, app
 
 client = TestClient(app)
 
@@ -412,6 +413,27 @@ def test_upload_key_extension_comes_from_type_not_filename(monkeypatch):
     url = asyncio.run(storage.upload_photo(f))
     assert url.endswith(".png")
     assert put["ContentType"] == "image/png"
+
+
+def test_record_date_is_korean_today(room, monkeypatch):
+    # 서버가 UTC여도 한국 날짜로 찍혀야 함 — UTC 9월 27일 16시 = 한국 28일 새벽 1시.
+    from datetime import datetime as real_datetime
+
+    class FrozenDatetime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime(2026, 9, 27, 16, 0, tzinfo=timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr("app.crud.datetime", FrozenDatetime)
+    created = client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=auth(room)).json()
+    assert created["date"] == "2026-09-28"
+
+
+def test_rate_limit_forgets_ips_after_the_window():
+    stale = datetime.now(timezone.utc) - ROOM_CREATE_WINDOW - timedelta(minutes=1)
+    _room_creations["203.0.113.9"] = [stale]
+    client.post("/api/rooms")
+    assert "203.0.113.9" not in _room_creations
 
 
 def test_upload_photo_without_token_is_403(room):
