@@ -371,6 +371,49 @@ def test_upload_photo_returns_s3_url(room, monkeypatch):
     assert resp.json()["url"].startswith("https://fake-bucket.s3.")
 
 
+def test_upload_rejects_non_image_types(room):
+    # 공개 S3에 올라가는 파일이라 HTML/SVG 같은 건 받지 않음.
+    for name, ctype in [("page.html", "text/html"), ("logo.svg", "image/svg+xml")]:
+        resp = client.post(
+            f"/api/rooms/{room['code']}/uploads",
+            files={"file": (name, b"<svg onload=alert(1)>", ctype)},
+            headers=auth(room),
+        )
+        assert resp.status_code == 415
+
+
+def test_upload_rejects_oversized_file(room, monkeypatch):
+    monkeypatch.setattr("app.main.storage.MAX_UPLOAD_BYTES", 10)
+    resp = client.post(
+        f"/api/rooms/{room['code']}/uploads",
+        files={"file": ("photo.jpg", b"x" * 11, "image/jpeg")},
+        headers=auth(room),
+    )
+    assert resp.status_code == 413
+
+
+def test_upload_key_extension_comes_from_type_not_filename(monkeypatch):
+    import asyncio
+    from io import BytesIO
+
+    from starlette.datastructures import Headers, UploadFile
+
+    from app import storage
+
+    put = {}
+
+    class FakeS3:
+        def put_object(self, **kw):
+            put.update(kw)
+
+    monkeypatch.setattr(storage, "_client", FakeS3())
+    monkeypatch.setattr(storage, "S3_BUCKET_NAME", "bucket")
+    f = UploadFile(BytesIO(b"img"), filename="evil.html", headers=Headers({"content-type": "image/png"}))
+    url = asyncio.run(storage.upload_photo(f))
+    assert url.endswith(".png")
+    assert put["ContentType"] == "image/png"
+
+
 def test_upload_photo_without_token_is_403(room):
     resp = client.post(
         f"/api/rooms/{room['code']}/uploads",

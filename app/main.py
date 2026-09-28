@@ -266,6 +266,16 @@ def remove_record(record_id: int, room: models.Room = Depends(require_owner), db
 
 @app.post("/api/rooms/{code}/uploads", response_model=schemas.UploadOut)
 async def upload_photo(file: UploadFile = File(...), room: models.Room = Depends(require_owner)):
+    # 올린 파일은 공개 S3에서 누구나 열 수 있어서, 브라우저가 이미지로만 다루는
+    # 형식만 받음 — 예전엔 클라이언트가 보낸 Content-Type을 그대로 믿어서
+    # text/html이나 (스크립트를 품을 수 있는) SVG도 공개 URL로 올라갈 수 있었음.
+    if file.content_type not in storage.ALLOWED_TYPES:
+        raise HTTPException(status_code=415, detail="unsupported file type")
+    body = await file.read()
+    if len(body) > storage.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="file too large")
+    await file.seek(0)
+
     # S3 자격증명이 없거나(로컬 개발 환경 등) 버킷에 문제가 생기면
     # boto3가 예외를 던짐 — 그걸 그대로 흘려보내면 처리 안 된 예외가 돼서
     # CORSMiddleware를 거치지 않고 CORS 헤더 없는 500이 나가버림. 브라우저는
