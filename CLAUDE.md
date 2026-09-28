@@ -105,7 +105,9 @@ tests/test_api.py
   삭제 시도는 400 `"last_page"`, 방 코드 자체가 없으면 404
   `"room not found"`, 토큰이 없거나 틀리면 403 `"not room owner"`,
   인생작(`PUT .../records/{id}/feature`)을 한 카테고리에 3개 넘게 켜려고
-  하면 400 `"featured_limit"`.
+  하면 400 `"featured_limit"`. 업로드(`POST .../uploads`)는 이미지 형식이
+  아니면(SVG 포함) 415 `"unsupported file type"`, 10MB를 넘으면 413
+  `"file too large"`(프론트는 지금 이 둘을 일반 저장 실패로만 안내함).
   이 문자열을 바꾸면 `mysite`의 프론트 코드도 같이 고쳐야 함.
 - `PUT /api/rooms/{code}/pages/{n}`은 부분 수정이 아니라 해당 페이지의
   `strokes` 전체를 교체하는 API. 저장 성공 시 같은 (room, page)를 보고

@@ -27,7 +27,7 @@
   바꾸면 동일한 코드로 로컬 테스트용 SQLite도 그대로 동작(테스트가 이 방식 사용).
 - **Alembic** — Postgres 스키마 변경 이력 관리. 기동할 때마다 자동으로
   최신 리비전까지 적용됨(SQLite 테스트는 매번 새로 만들어서 필요 없음).
-- **S3(boto3)** — 기록 보관소 사진 저장소. `POST /api/uploads`가 파일을
+- **S3(boto3)** — 기록 보관소 사진 저장소. `POST /api/rooms/{code}/uploads`가 파일을
   받아 S3에 올리고 URL을 돌려줌.
 - **Docker + docker-compose** — API 컨테이너와 PostgreSQL 컨테이너를 한 번에 실행.
 - **GitHub Actions** — 푸시할 때마다 테스트 실행 → 통과하면 Docker 이미지를
@@ -91,11 +91,14 @@ DATABASE_URL=postgresql+psycopg2://sketchbook:sketchbook@localhost:5432/sketchbo
 
 ## 프론트엔드와 연결하기
 
-1. Render에 배포한 뒤, `CORS_ORIGINS` 환경 변수에 프론트엔드가 서비스되는
-   실제 주소(예: `https://<사용자명>.github.io`)를 넣기(현재 `render.yaml`
-   기본값은 `*`).
-2. `mysite` 레포의 `sketchbook.html` 상단 `API_BASE` 상수를 이 서버의 배포된
-   주소(`https://sketchbook-api.onrender.com` 형태)로 바꾸기.
+1. `CORS_ORIGINS` 환경 변수에 프론트엔드가 서비스되는 실제 주소를 넣기
+   (쉼표로 여러 개 가능). 현재 `render.yaml`에는
+   `https://ddonni.github.io`로 들어가 있음. 변수를 아예 비워두면 코드
+   기본값인 `*`(모두 허용)가 적용됨.
+2. `mysite` 레포의 `js/shared/config.js`에 있는 `API_BASE`를 이 서버의
+   배포된 주소(`https://sketchbook-api.onrender.com` 형태)로 맞추기.
+   스케치북·기록 보관소·로비가 모두 이 값 하나를 같이 씀. localhost에서
+   열면 자동으로 `http://localhost:8000`을 봄.
 
 ## 테스트
 
@@ -110,9 +113,10 @@ pytest -q
 
 ## 페이지 삭제가 안전한 이유
 
-`page_number`에는 DB 레벨 UNIQUE 제약이 걸려 있음. 페이지를 삭제하면 뒤에
-있던 페이지 번호를 전부 하나씩 당겨야 하는데, 이를
-`UPDATE pages SET page_number = page_number - 1 WHERE page_number > n`
+`(room_id, page_number)`에는 DB 레벨 UNIQUE 제약이 걸려 있음(방마다 자기만의
+1..count 번호 체계). 페이지를 삭제하면 같은 방에서 뒤에 있던 페이지 번호를
+전부 하나씩 당겨야 하는데, 이를
+`UPDATE pages SET page_number = page_number - 1 WHERE room_id = r AND page_number > n`
 한 줄로 처리하면 실행 도중 번호가 일시적으로 겹쳐 UNIQUE 제약을 위반할 수
 있음. `app/crud.py`의 `delete_page`는 대상 페이지들의 번호를 먼저 전부
 음수로 뒤집었다가 다시 `-1`을 적용해 최종 값을 맞추는 2단계로 처리해서
