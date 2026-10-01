@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, false, func
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -62,6 +62,10 @@ class Record(Base):
     # 카테고리마다 최대 3개(crud.FEATURED_PER_CAT)까지 켤 수 있고, 로비의 각
     # 카테고리 가구 맨 앞자리에 걸림.
     featured = Column(Boolean, nullable=False, default=False)
+    # 로비 턴테이블에서 돌릴 곡으로 직접 고른 음악 — 방마다 최대 한 곡
+    # (crud.set_playing이 다른 곡을 끔). 아무것도 안 고르면 프론트(showcase.js의
+    # pickMusic)가 최애음악 첫 번째, 없으면 가장 최근 곡을 돌림.
+    playing = Column(Boolean, nullable=False, default=False, server_default=false())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     room = relationship("Room", back_populates="records")

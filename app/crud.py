@@ -185,6 +185,9 @@ def update_record(db: Session, room_id: int, record_id: int, data: dict) -> Opti
         return None
     for key, value in data.items():
         setattr(record, key, value)
+    # 음악이 아닌 카테고리로 고쳐졌으면 턴테이블에서도 내림.
+    if record.cat != "music":
+        record.playing = False
     db.commit()
     db.refresh(record)
     return record
@@ -215,6 +218,29 @@ def set_featured(db: Session, room_id: int, record_id: int, featured: bool) -> O
         if count >= FEATURED_PER_CAT:
             raise FeaturedLimitError()
     record.featured = featured
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+class NotMusicError(Exception):
+    """음악이 아닌 기록을 턴테이블에 올리려고 함."""
+
+
+def set_playing(db: Session, room_id: int, record_id: int, playing: bool) -> Optional[models.Record]:
+    """로비 턴테이블에서 돌릴 곡을 직접 고름 — 방마다 한 곡뿐이라, 켜면 이
+    방에서 켜져 있던 다른 곡은 끔. 끄면 아무 곡도 안 고른 상태가 되고 프론트가
+    기본 규칙(최애음악 첫 번째, 없으면 최신 곡)으로 정함."""
+    record = _get_record(db, room_id, record_id)
+    if record is None:
+        return None
+    if playing:
+        if record.cat != "music":
+            raise NotMusicError()
+        db.query(models.Record).filter(
+            models.Record.room_id == room_id, models.Record.playing.is_(True), models.Record.id != record_id
+        ).update({models.Record.playing: False}, synchronize_session=False)
+    record.playing = playing
     db.commit()
     db.refresh(record)
     return record

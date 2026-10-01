@@ -352,6 +352,58 @@ def test_record_title_is_required(room):
     assert resp.status_code == 422
 
 
+def _play(room, record_id, playing=True, headers=None):
+    return client.put(
+        f"/api/rooms/{room['code']}/records/{record_id}/playing",
+        json={"playing": playing},
+        headers=auth(room) if headers is None else headers,
+    )
+
+
+def test_playing_is_one_song_per_room(room):
+    a = _create(room, cat="music", title="노래A")
+    b = _create(room, cat="music", title="노래B")
+    assert a["playing"] is False  # 기본은 아무 곡도 안 고름(로비가 기본 규칙으로 정함)
+
+    assert _play(room, a["id"]).json()["playing"] is True
+    assert _play(room, b["id"]).json()["playing"] is True
+    records = {r["id"]: r for r in client.get(f"/api/rooms/{room['code']}/records").json()}
+    assert (records[a["id"]]["playing"], records[b["id"]]["playing"]) == (False, True)
+
+    assert _play(room, b["id"], False).json()["playing"] is False
+
+
+def test_playing_is_per_room():
+    room_a = client.post("/api/rooms").json()
+    room_b = client.post("/api/rooms").json()
+    a = _create(room_a, cat="music", title="A")
+    b = _create(room_b, cat="music", title="B")
+    _play(room_a, a["id"])
+    _play(room_b, b["id"])
+    # 다른 방에서 켠 곡이 이 방의 곡을 끄지 않음
+    assert client.get(f"/api/rooms/{room_a['code']}/records").json()[0]["playing"] is True
+
+
+def test_only_music_can_be_playing(room):
+    book = _create(room)
+    resp = _play(room, book["id"])
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "not_music"
+
+
+def test_editing_a_song_into_another_category_stops_it_playing(room):
+    song = _create(room, cat="music", title="노래")
+    _play(room, song["id"])
+    resp = client.put(f"/api/rooms/{room['code']}/records/{song['id']}", json=make_record(), headers=auth(room))
+    assert resp.json()["playing"] is False
+
+
+def test_playing_requires_owner_token_and_existing_record(room):
+    song = _create(room, cat="music", title="노래")
+    assert _play(room, song["id"], headers={}).status_code == 403
+    assert _play(room, 999).status_code == 404
+
+
 def test_feature_missing_record_is_404(room):
     resp = client.put(f"/api/rooms/{room['code']}/records/999/feature", json={"featured": True}, headers=auth(room))
     assert resp.status_code == 404

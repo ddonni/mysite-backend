@@ -268,6 +268,17 @@ def feature_record(record_id: int, body: schemas.RecordFeatureIn, room: models.R
     return record
 
 
+@app.put("/api/rooms/{code}/records/{record_id}/playing", response_model=schemas.RecordOut)
+def play_record(record_id: int, body: schemas.RecordPlayingIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
+    try:
+        record = crud.set_playing(db, room.id, record_id, body.playing)
+    except crud.NotMusicError:
+        raise HTTPException(status_code=400, detail="not_music")
+    if record is None:
+        raise HTTPException(status_code=404, detail="record not found")
+    return record
+
+
 @app.delete("/api/rooms/{code}/records/{record_id}")
 def remove_record(record_id: int, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
     ok = crud.delete_record(db, room.id, record_id)
