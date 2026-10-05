@@ -60,6 +60,15 @@ def make_record(**overrides):
     return body
 
 
+# --- health check ---
+
+
+def test_health_check():
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "healthy"}
+
+
 # --- rooms ---
 
 def test_create_room_returns_code_and_token():

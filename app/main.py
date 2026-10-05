@@ -121,6 +121,11 @@ def require_owner(room: models.Room = Depends(get_room), x_room_token: Optional[
     return room
 
 
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
+
 @app.post("/api/rooms", response_model=schemas.RoomOut)
 def create_room(request: Request, db: Session = Depends(get_db)):
     _check_room_rate_limit(request)
