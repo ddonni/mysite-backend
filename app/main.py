@@ -1,4 +1,5 @@
 import os
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
@@ -98,11 +99,22 @@ def _client_ip(request: Request) -> str:
 def _check_room_rate_limit(request: Request) -> None:
     ip = _client_ip(request)
     now = datetime.now(timezone.utc)
+    # 창(ROOM_CREATE_WINDOW)이 지난 IP는 통째로 지움 — 안 그러면 한 번이라도
+    # 방을 만든 IP마다 빈 목록이 프로세스가 살아 있는 내내 쌓여감.
+    for other in [k for k, ts in _room_creations.items() if not ts or now - ts[-1] >= ROOM_CREATE_WINDOW]:
+        del _room_creations[other]
     recent = [t for t in _room_creations.get(ip, []) if now - t < ROOM_CREATE_WINDOW]
     if len(recent) >= ROOM_CREATE_LIMIT:
         raise HTTPException(status_code=429, detail="too many rooms created, try again later")
     recent.append(now)
     _room_creations[ip] = recent
+
+
+def _token_matches(given: Optional[str], real: str) -> bool:
+    # 문자열을 ==로 비교하면 앞에서부터 틀린 글자를 만나는 순간 끝나서, 응답
+    # 시간 차이로 token을 한 글자씩 맞춰볼 여지가 생김 — 항상 같은 시간이
+    # 걸리는 비교를 씀.
+    return bool(given) and secrets.compare_digest(given.encode(), real.encode())
 
 
 def get_room(code: str, db: Session = Depends(get_db)) -> models.Room:
@@ -116,7 +128,7 @@ def require_owner(room: models.Room = Depends(get_room), x_room_token: Optional[
     """Visiting a room by its (shareable) code is always read-only.
     Mutating it additionally requires the room's (secret) token, which
     only the owner's browser holds — sent as the X-Room-Token header."""
-    if not x_room_token or x_room_token != room.token:
+    if not _token_matches(x_room_token, room.token):
         raise HTTPException(status_code=403, detail="not room owner")
     return room
 
@@ -171,7 +183,7 @@ def google_auth_resolve(body: schemas.GoogleAuthIn, db: Session = Depends(get_db
 
     if body.current_code and body.current_token:
         current = crud.get_room_by_code(db, body.current_code)
-        if current is not None and current.token == body.current_token:
+        if current is not None and _token_matches(body.current_token, current.token):
             crud.set_google_sub(db, current, sub, claims.get("email"))
             return {"code": current.code, "token": current.token, "linked_new": True}
 
@@ -261,6 +273,17 @@ def feature_record(record_id: int, body: schemas.RecordFeatureIn, room: models.R
     return record
 
 
+@app.put("/api/rooms/{code}/records/{record_id}/playing", response_model=schemas.RecordOut)
+def play_record(record_id: int, body: schemas.RecordPlayingIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
+    try:
+        record = crud.set_playing(db, room.id, record_id, body.playing)
+    except crud.NotMusicError:
+        raise HTTPException(status_code=400, detail="not_music")
+    if record is None:
+        raise HTTPException(status_code=404, detail="record not found")
+    return record
+
+
 @app.delete("/api/rooms/{code}/records/{record_id}")
 def remove_record(record_id: int, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
     ok = crud.delete_record(db, room.id, record_id)
@@ -271,6 +294,16 @@ def remove_record(record_id: int, room: models.Room = Depends(require_owner), db
 
 @app.post("/api/rooms/{code}/uploads", response_model=schemas.UploadOut)
 async def upload_photo(file: UploadFile = File(...), room: models.Room = Depends(require_owner)):
+    # 올린 파일은 공개 S3에서 누구나 열 수 있어서, 브라우저가 이미지로만 다루는
+    # 형식만 받음 — 예전엔 클라이언트가 보낸 Content-Type을 그대로 믿어서
+    # text/html이나 (스크립트를 품을 수 있는) SVG도 공개 URL로 올라갈 수 있었음.
+    if file.content_type not in storage.ALLOWED_TYPES:
+        raise HTTPException(status_code=415, detail="unsupported file type")
+    body = await file.read()
+    if len(body) > storage.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="file too large")
+    await file.seek(0)
+
     # S3 자격증명이 없거나(로컬 개발 환경 등) 버킷에 문제가 생기면
     # boto3가 예외를 던짐 — 그걸 그대로 흘려보내면 처리 안 된 예외가 돼서
     # CORSMiddleware를 거치지 않고 CORS 헤더 없는 500이 나가버림. 브라우저는
@@ -302,4 +335,8 @@ async def page_socket(websocket: WebSocket, code: str, n: int):
             # they disconnect (or send a ping, which we ignore)
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
+        # 정상 종료가 아닌 예외로 끝나도 목록에서 빠지게 — 안 그러면 죽은 소켓이
+        # 남아 저장할 때마다 broadcast가 헛되이 보내려 함.
         manager.disconnect(key, websocket)

@@ -3,6 +3,7 @@ same SQLAlchemy code path, no database server needed. This is what CI runs
 on every push.
 """
 import os
+from datetime import datetime, timedelta, timezone
 
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 
@@ -10,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database import Base, engine
-from app.main import ROOM_CREATE_LIMIT, _room_creations, app
+from app.main import ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW, _room_creations, app
 
 client = TestClient(app)
 
@@ -360,6 +361,58 @@ def test_record_title_is_required(room):
     assert resp.status_code == 422
 
 
+def _play(room, record_id, playing=True, headers=None):
+    return client.put(
+        f"/api/rooms/{room['code']}/records/{record_id}/playing",
+        json={"playing": playing},
+        headers=auth(room) if headers is None else headers,
+    )
+
+
+def test_playing_is_one_song_per_room(room):
+    a = _create(room, cat="music", title="노래A")
+    b = _create(room, cat="music", title="노래B")
+    assert a["playing"] is False  # 기본은 아무 곡도 안 고름(로비가 기본 규칙으로 정함)
+
+    assert _play(room, a["id"]).json()["playing"] is True
+    assert _play(room, b["id"]).json()["playing"] is True
+    records = {r["id"]: r for r in client.get(f"/api/rooms/{room['code']}/records").json()}
+    assert (records[a["id"]]["playing"], records[b["id"]]["playing"]) == (False, True)
+
+    assert _play(room, b["id"], False).json()["playing"] is False
+
+
+def test_playing_is_per_room():
+    room_a = client.post("/api/rooms").json()
+    room_b = client.post("/api/rooms").json()
+    a = _create(room_a, cat="music", title="A")
+    b = _create(room_b, cat="music", title="B")
+    _play(room_a, a["id"])
+    _play(room_b, b["id"])
+    # 다른 방에서 켠 곡이 이 방의 곡을 끄지 않음
+    assert client.get(f"/api/rooms/{room_a['code']}/records").json()[0]["playing"] is True
+
+
+def test_only_music_can_be_playing(room):
+    book = _create(room)
+    resp = _play(room, book["id"])
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "not_music"
+
+
+def test_editing_a_song_into_another_category_stops_it_playing(room):
+    song = _create(room, cat="music", title="노래")
+    _play(room, song["id"])
+    resp = client.put(f"/api/rooms/{room['code']}/records/{song['id']}", json=make_record(), headers=auth(room))
+    assert resp.json()["playing"] is False
+
+
+def test_playing_requires_owner_token_and_existing_record(room):
+    song = _create(room, cat="music", title="노래")
+    assert _play(room, song["id"], headers={}).status_code == 403
+    assert _play(room, 999).status_code == 404
+
+
 def test_feature_missing_record_is_404(room):
     resp = client.put(f"/api/rooms/{room['code']}/records/999/feature", json={"featured": True}, headers=auth(room))
     assert resp.status_code == 404
@@ -378,6 +431,70 @@ def test_upload_photo_returns_s3_url(room, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json()["url"].startswith("https://fake-bucket.s3.")
+
+
+def test_upload_rejects_non_image_types(room):
+    # 공개 S3에 올라가는 파일이라 HTML/SVG 같은 건 받지 않음.
+    for name, ctype in [("page.html", "text/html"), ("logo.svg", "image/svg+xml")]:
+        resp = client.post(
+            f"/api/rooms/{room['code']}/uploads",
+            files={"file": (name, b"<svg onload=alert(1)>", ctype)},
+            headers=auth(room),
+        )
+        assert resp.status_code == 415
+
+
+def test_upload_rejects_oversized_file(room, monkeypatch):
+    monkeypatch.setattr("app.main.storage.MAX_UPLOAD_BYTES", 10)
+    resp = client.post(
+        f"/api/rooms/{room['code']}/uploads",
+        files={"file": ("photo.jpg", b"x" * 11, "image/jpeg")},
+        headers=auth(room),
+    )
+    assert resp.status_code == 413
+
+
+def test_upload_key_extension_comes_from_type_not_filename(monkeypatch):
+    import asyncio
+    from io import BytesIO
+
+    from starlette.datastructures import Headers, UploadFile
+
+    from app import storage
+
+    put = {}
+
+    class FakeS3:
+        def put_object(self, **kw):
+            put.update(kw)
+
+    monkeypatch.setattr(storage, "_client", FakeS3())
+    monkeypatch.setattr(storage, "S3_BUCKET_NAME", "bucket")
+    f = UploadFile(BytesIO(b"img"), filename="evil.html", headers=Headers({"content-type": "image/png"}))
+    url = asyncio.run(storage.upload_photo(f))
+    assert url.endswith(".png")
+    assert put["ContentType"] == "image/png"
+
+
+def test_record_date_is_korean_today(room, monkeypatch):
+    # 서버가 UTC여도 한국 날짜로 찍혀야 함 — UTC 9월 27일 16시 = 한국 28일 새벽 1시.
+    from datetime import datetime as real_datetime
+
+    class FrozenDatetime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime(2026, 9, 27, 16, 0, tzinfo=timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr("app.crud.datetime", FrozenDatetime)
+    created = client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=auth(room)).json()
+    assert created["date"] == "2026-09-28"
+
+
+def test_rate_limit_forgets_ips_after_the_window():
+    stale = datetime.now(timezone.utc) - ROOM_CREATE_WINDOW - timedelta(minutes=1)
+    _room_creations["203.0.113.9"] = [stale]
+    client.post("/api/rooms")
+    assert "203.0.113.9" not in _room_creations
 
 
 def test_upload_photo_without_token_is_403(room):

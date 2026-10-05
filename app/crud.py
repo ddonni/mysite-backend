@@ -1,5 +1,5 @@
 import secrets
-from datetime import date
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from sqlalchemy import func
@@ -150,8 +150,18 @@ def list_records(db: Session, room_id: int, cat: Optional[str] = None) -> list:
     return q.order_by(models.Record.date.desc(), models.Record.id.desc()).all()
 
 
+# 기록 날짜는 "사용자가 사는 곳의 오늘" — 서버(Render)는 UTC라 date.today()를
+# 쓰면 한국 시간 0~9시에 남긴 기록이 어제 날짜로 찍혔음. 한국은 서머타임이
+# 없어서 고정 +9시간이면 충분함(tzdata 패키지 없이도 동작).
+KST = timezone(timedelta(hours=9))
+
+
+def today_kst() -> str:
+    return datetime.now(KST).date().isoformat()
+
+
 def create_record(db: Session, room_id: int, data: dict) -> models.Record:
-    record = models.Record(**data, room_id=room_id, date=date.today().isoformat())
+    record = models.Record(**data, room_id=room_id, date=today_kst())
     db.add(record)
     db.commit()
     db.refresh(record)
@@ -175,6 +185,9 @@ def update_record(db: Session, room_id: int, record_id: int, data: dict) -> Opti
         return None
     for key, value in data.items():
         setattr(record, key, value)
+    # 음악이 아닌 카테고리로 고쳐졌으면 턴테이블에서도 내림.
+    if record.cat != "music":
+        record.playing = False
     db.commit()
     db.refresh(record)
     return record
@@ -205,6 +218,29 @@ def set_featured(db: Session, room_id: int, record_id: int, featured: bool) -> O
         if count >= FEATURED_PER_CAT:
             raise FeaturedLimitError()
     record.featured = featured
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+class NotMusicError(Exception):
+    """음악이 아닌 기록을 턴테이블에 올리려고 함."""
+
+
+def set_playing(db: Session, room_id: int, record_id: int, playing: bool) -> Optional[models.Record]:
+    """로비 턴테이블에서 돌릴 곡을 직접 고름 — 방마다 한 곡뿐이라, 켜면 이
+    방에서 켜져 있던 다른 곡은 끔. 끄면 아무 곡도 안 고른 상태가 되고 프론트가
+    기본 규칙(최애음악 첫 번째, 없으면 최신 곡)으로 정함."""
+    record = _get_record(db, room_id, record_id)
+    if record is None:
+        return None
+    if playing:
+        if record.cat != "music":
+            raise NotMusicError()
+        db.query(models.Record).filter(
+            models.Record.room_id == room_id, models.Record.playing.is_(True), models.Record.id != record_id
+        ).update({models.Record.playing: False}, synchronize_session=False)
+    record.playing = playing
     db.commit()
     db.refresh(record)
     return record

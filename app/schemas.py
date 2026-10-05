@@ -109,6 +109,7 @@ class RecordOut(RecordIn):
     id: int
     date: str
     featured: bool = False
+    playing: bool = False
 
 
 class RecordFeatureIn(BaseModel):
@@ -116,6 +117,13 @@ class RecordFeatureIn(BaseModel):
     필드는 안 건드리고 이 플래그 하나만 켜고/끄는 데 씀."""
 
     featured: bool
+
+
+class RecordPlayingIn(BaseModel):
+    """PUT .../records/{id}/playing 전용 바디 — 이 곡을 로비 턴테이블에
+    올리거나(true) 내림(false)."""
+
+    playing: bool
 
 
 class UploadOut(BaseModel):
