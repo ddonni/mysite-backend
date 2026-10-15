@@ -212,66 +212,77 @@ def test_public_list_is_ordered_by_latest_record_activity():
     assert [r["code"] for r in client.get("/api/rooms").json()] == [older["code"], newer["code"]]
 
 
-# --- 제목 자동 완성 ---
+# --- 자동 완성(제목 칸·만든 사람 칸) ---
 
-def suggest(r, q, cat="book"):
-    resp = client.get(f"/api/rooms/{r['code']}/title-suggestions", params={"cat": cat, "q": q})
+def suggest(r, q, cat="book", field="title"):
+    resp = client.get(f"/api/rooms/{r['code']}/suggestions", params={"cat": cat, "field": field, "q": q})
     assert resp.status_code == 200
     return resp.json()
+
+
+def values(items):
+    return [s["value"] for s in items]
 
 
 def add(r, **kw):
     client.post(f"/api/rooms/{r['code']}/records", json=make_record(**kw), headers=auth(r))
 
 
-def test_suggestions_include_my_own_titles_marked_mine(room):
+def test_suggestions_include_my_own_values_marked_mine(room):
     add(room, title="데미안", creator="헤르만 헤세")
-    (s,) = suggest(room, "데미")
-    assert s == {"title": "데미안", "creator": "헤르만 헤세", "mine": True, "rooms": 1}
+    assert suggest(room, "데미") == [{"value": "데미안", "mine": True, "rooms": 1}]
+    assert suggest(room, "헤세", field="creator") == [{"value": "헤르만 헤세", "mine": True, "rooms": 1}]
     assert suggest(room, "데미", cat="movie") == []  # 카테고리가 다르면 안 나옴
     assert suggest(room, "") == []
 
 
-def test_other_rooms_titles_need_two_public_rooms(room):
+def test_unknown_field_is_rejected(room):
+    resp = client.get(f"/api/rooms/{room['code']}/suggestions", params={"cat": "book", "field": "memo", "q": "a"})
+    assert resp.status_code == 422  # 한 줄 감상 같은 개인적인 칸은 후보로 안 내줌
+
+
+def test_other_rooms_values_need_two_public_rooms(room):
     a, b, c = (client.post("/api/rooms").json() for _ in range(3))
     for r in (a, b):
         add(r, title="어린 왕자", creator="생텍쥐페리")
-    add(c, title="이상한 제목", creator="장난")
+    add(c, title="이상한 제목", creator="장난꾼")
     for r in (a, c):
         make_public(r)
-    # b가 비공개라 "어린 왕자"는 공개 방 1개뿐 → 안 나옴
+    # b가 비공개라 "어린 왕자"/"생텍쥐페리"는 공개 방 1개뿐 → 안 나옴
     assert suggest(room, "왕자") == []
+    assert suggest(room, "생텍", field="creator") == []
     make_public(b)
-    assert [s["title"] for s in suggest(room, "왕자")] == ["어린 왕자"]
-    assert suggest(room, "이상한") == []  # 공개 방 하나에만 있는 제목은 안 퍼짐
+    assert values(suggest(room, "왕자")) == ["어린 왕자"]
+    assert values(suggest(room, "생텍", field="creator")) == ["생텍쥐페리"]
+    # 공개 방 하나에만 있는 값은 안 퍼짐
+    assert suggest(room, "이상한") == []
+    assert suggest(room, "장난", field="creator") == []
 
 
-def test_private_rooms_titles_never_leak(room):
+def test_private_rooms_values_never_leak(room):
     a, b = (client.post("/api/rooms").json() for _ in range(2))
     for r in (a, b):
-        add(r, title="비밀 일기")
+        add(r, title="비밀 일기", creator="비밀 작가")
     assert suggest(room, "비밀") == []
+    assert suggest(room, "비밀", field="creator") == []
 
 
-def test_creator_only_when_unambiguous(room):
+def test_spelling_variants_are_grouped_and_fields_are_independent(room):
     a, b, c = (client.post("/api/rooms").json() for _ in range(3))
     add(a, cat="music", title="Blue", creator="Joni Mitchell")
-    add(b, cat="music", title="blue ", creator="joni mitchell")  # 표기만 다른 같은 작품
+    add(b, cat="music", title="blue ", creator="joni  mitchell")
     add(c, cat="music", title="Blue", creator="다른 가수")
-    for r in (a, b):
+    for r in (a, b, c):
         make_public(r)
     (s,) = suggest(room, "blu", cat="music")
-    assert s["title"] == "Blue" and s["creator"] == "Joni Mitchell" and s["rooms"] == 2
-    make_public(c)  # 동명의 다른 곡이 섞이면 만든 사람은 비워둠
-    (s,) = suggest(room, "blu", cat="music")
-    assert s["creator"] is None and s["rooms"] == 3
+    assert s["value"] == "Blue" and s["rooms"] == 3 and "creator" not in s  # 제목 후보는 가수를 안 알려줌
+    assert values(suggest(room, "joni", cat="music", field="creator")) == ["Joni Mitchell"]
 
 
 def test_suggestions_prefix_first_then_popularity(room):
     add(room, title="나의 아저씨")
     add(room, title="아저씨")
-    titles = [s["title"] for s in suggest(room, "아저씨")]
-    assert titles == ["아저씨", "나의 아저씨"]
+    assert values(suggest(room, "아저씨")) == ["아저씨", "나의 아저씨"]
 
 
 # --- pages: read-only vs owner ---

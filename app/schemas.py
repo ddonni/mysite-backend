@@ -46,12 +46,11 @@ class PublicRoomOut(BaseModel):
     total: int
 
 
-class TitleSuggestionOut(BaseModel):
-    """GET .../title-suggestions 후보 하나. creator는 그 제목의 만든 사람이 한
-    명으로 정해질 때만 있음. mine은 이 방에 이미 기록된 제목인지."""
+class SuggestionOut(BaseModel):
+    """GET .../suggestions 후보 하나 — value는 제목이나 만든 사람 이름(요청한 칸).
+    mine은 이 방에 이미 있는 값인지, rooms는 몇 개 방에서 쓰였는지."""
 
-    title: str
-    creator: Optional[str] = None
+    value: str
     mine: bool
     rooms: int
 

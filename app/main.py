@@ -262,17 +262,18 @@ def list_records(cat: Optional[str] = None, room: models.Room = Depends(get_room
     return crud.list_records(db, room.id, cat)
 
 
-@app.get("/api/rooms/{code}/title-suggestions", response_model=List[schemas.TitleSuggestionOut])
-def title_suggestions(
+@app.get("/api/rooms/{code}/suggestions", response_model=List[schemas.SuggestionOut])
+def suggestions(
     cat: Literal["book", "anime", "movie", "music"],
+    field: Literal["title", "creator"],
     q: str = "",
     room: models.Room = Depends(get_room),
     db: Session = Depends(get_db),
 ):
-    """기록 추가 창의 제목 자동 완성 — 이 방 + 공개된 방들의 기록에서 찾음
-    (자세한 규칙은 crud.title_suggestions). 다른 GET처럼 코드만 있으면 됨 —
+    """기록 추가 창의 자동 완성(제목 칸·만든 사람 칸) — 이 방 + 공개된 방들의
+    기록에서 찾음(자세한 규칙은 crud.suggestions). 다른 GET처럼 코드만 있으면 됨 —
     비공개 방의 기록은 그 방 자신의 후보로만 쓰이고 남에게는 안 나감."""
-    return crud.title_suggestions(db, room, cat, q[:100])
+    return crud.suggestions(db, room, cat, field, q[:100])
 
 
 @app.post("/api/rooms/{code}/records", response_model=schemas.RecordOut)
