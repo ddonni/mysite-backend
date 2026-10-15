@@ -47,8 +47,7 @@
 없음). `render.yaml`(Blueprint)이 API 서비스를 정의하고, `main` push마다
 자동 재배포됨. `DATABASE_URL`은 Neon의 풀러 없는 직접 연결 주소
 (`?sslmode=require`)를 Render 대시보드에서 직접 넣음(`sync: false`) — 2026-09-27에
-Render 무료 DB에서 옮김. `render.yaml`의 `databases:`(예전 Render DB)는 만료되는
-2026-10-15 무렵까지 백업으로만 남겨둔 것이라 서버는 안 씀. S3 관련 4개 변수
+Render 무료 DB에서 옮겼고, 예전 Render DB는 만료 후 삭제함. S3 관련 4개 변수
 (`S3_BUCKET_NAME`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`)는 `render.yaml`에 `sync: false`로만 선언돼
 있고 실제 값은 Render 대시보드 Environment 탭에서 수동으로 채워야 함.

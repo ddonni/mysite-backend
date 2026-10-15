@@ -30,11 +30,3 @@ services:
       # 프론트 client_id와 반드시 같은 값이어야 함).
       - key: GOOGLE_CLIENT_ID
         sync: false
-
-# 예전 Render 무료 DB — 이제 서버는 안 씀(위 DATABASE_URL 참고). 무료 기간이
-# 끝나는 2026-10-15 무렵까지 되돌릴 수 있는 백업으로만 남겨둠. 그 뒤 이 블록을 지움.
-databases:
-  - name: sketchbook-db
-    plan: free
-    databaseName: sketchbook
-    user: sketchbook
