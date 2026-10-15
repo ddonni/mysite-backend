@@ -26,6 +26,13 @@
   브라우저가 바뀌어도 token을 되찾을 수 있게" 하는 보조 기능임 —
   `rooms.google_sub`에 저장되고, code/token이 여전히 유일한 진짜
   인증 수단이라는 점은 안 바뀜.)
+- "방 둘러보기": `rooms.is_public`(기본 false)을 방 주인이
+  `PUT /api/rooms/{code}/visibility` `{public: bool}`(토큰 필요)로 켜고 끔.
+  `GET /api/rooms`(토큰 없이 누구나)는 공개로 켠 방 중 **기록이 하나라도
+  있는 방만** 최근 기록 활동순으로 최대 60개, 코드·이름·테마·카테고리별
+  기록 수만 돌려줌(토큰·구글 정보는 절대 안 넣음). 비공개여도 코드를 아는
+  사람은 지금처럼 들어올 수 있음 — 목록에만 안 뜸. `GET /api/rooms/{code}`
+  응답에도 `is_public`이 들어감.
 - `Page`/`Record`는 둘 다 `room_id`를 가지며, `Page`의
   `(room_id, page_number)`가 유니크 — 방마다 자기만의 1..count
   페이지 번호 체계를 가짐(예전엔 `page_number` 전역 유니크였음).

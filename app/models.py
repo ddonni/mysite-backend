@@ -33,6 +33,10 @@ class Room(Base):
     # 위 계정의 이메일 — 화면에 "어떤 계정이 연동됐는지" 보여주기 위한
     # 표시용 값일 뿐, 조회/인증 어디에도 이 값 자체로는 안 씀(sub가 진짜 키).
     google_email = Column(String, nullable=True)
+    # "방 둘러보기"(GET /api/rooms) 목록에 이 방을 올릴지 — 방 주인이 고름.
+    # 꺼져 있어도 코드를 아는 사람은 지금처럼 들어올 수 있음(목록에만 안 뜸).
+    # 처음엔 다들 비공개 — 모르는 사이에 남들 목록에 뜨지 않게.
+    is_public = Column(Boolean, nullable=False, default=False, server_default=false())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     pages = relationship("Page", back_populates="room", cascade="all, delete-orphan")

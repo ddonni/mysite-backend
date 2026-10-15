@@ -145,9 +145,22 @@ def create_room(request: Request, db: Session = Depends(get_db)):
     return {"code": room.code, "token": room.token}
 
 
+@app.get("/api/rooms", response_model=List[schemas.PublicRoomOut])
+def list_public_rooms(db: Session = Depends(get_db)):
+    """"방 둘러보기" — 방 주인이 공개로 켠 방들(기록이 있는 방만, 최근 활동순).
+    누구나 볼 수 있는 값(코드·이름·테마·카테고리별 기록 수)만 돌려줌."""
+    return crud.list_public_rooms(db)
+
+
 @app.get("/api/rooms/{code}")
 def read_room(room: models.Room = Depends(get_room)):
-    return {"code": room.code, "theme": room.theme, "name": room.name}
+    return {"code": room.code, "theme": room.theme, "name": room.name, "is_public": room.is_public}
+
+
+@app.put("/api/rooms/{code}/visibility")
+def update_visibility(body: schemas.RoomVisibilityIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
+    crud.set_public(db, room, body.public)
+    return {"is_public": room.is_public}
 
 
 @app.put("/api/rooms/{code}/theme")

@@ -1,6 +1,6 @@
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -53,6 +53,60 @@ def set_name(db: Session, room: models.Room, name: str) -> models.Room:
     db.commit()
     db.refresh(room)
     return room
+
+
+def set_public(db: Session, room: models.Room, public: bool) -> models.Room:
+    room.is_public = public
+    db.commit()
+    db.refresh(room)
+    return room
+
+
+PUBLIC_ROOMS_LIMIT = 60
+
+
+def list_public_rooms(db: Session) -> List[dict]:
+    """"방 둘러보기" 목록 — 공개로 켠 방 중 기록이 하나라도 있는 방만(빈
+    방은 구경할 게 없어서 뺌), 기록을 가장 최근에 남기거나 고친 방부터.
+    방마다 카테고리별 기록 수를 붙여 줌. 규모가 작아서 방 수만큼 따로 세지
+    않고, 기록 개수/최근 시각은 한 번의 GROUP BY로 같이 뽑음."""
+    rows = (
+        db.query(
+            models.Room.id,
+            models.Record.cat,
+            func.count(models.Record.id),
+            func.max(models.Record.updated_at),
+        )
+        .join(models.Record, models.Record.room_id == models.Room.id)
+        .filter(models.Room.is_public.is_(True))
+        .group_by(models.Room.id, models.Record.cat)
+        .all()
+    )
+    stats: Dict[int, dict] = {}
+    for room_id, cat, n, latest in rows:
+        s = stats.setdefault(room_id, {"counts": {}, "latest": None})
+        s["counts"][cat] = n
+        if latest is not None and (s["latest"] is None or latest > s["latest"]):
+            s["latest"] = latest
+    if not stats:
+        return []
+
+    rooms = db.query(models.Room).filter(models.Room.id.in_(stats.keys())).all()
+    # 최근 활동 순 — 시각이 없는 경우(이론상)는 맨 뒤로.
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+
+    def latest_of(room: models.Room) -> datetime:
+        t = stats[room.id]["latest"]
+        if t is None:
+            return oldest
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+    rooms.sort(key=latest_of, reverse=True)
+    out = []
+    for room in rooms[:PUBLIC_ROOMS_LIMIT]:
+        counts = {cat: stats[room.id]["counts"].get(cat, 0) for cat in ("book", "anime", "movie", "music")}
+        out.append({"code": room.code, "name": room.name, "theme": room.theme, "counts": counts, "total": sum(counts.values())})
+    return out
 
 
 def get_room_by_google_sub(db: Session, sub: str) -> Optional[models.Room]:

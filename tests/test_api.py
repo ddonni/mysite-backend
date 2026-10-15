@@ -83,7 +83,7 @@ def test_create_room_returns_code_and_token():
 def test_room_lookup_by_code(room):
     resp = client.get(f"/api/rooms/{room['code']}")
     assert resp.status_code == 200
-    assert resp.json() == {"code": room["code"], "theme": "wood", "name": None}
+    assert resp.json() == {"code": room["code"], "theme": "wood", "name": None, "is_public": False}
 
 
 def test_unknown_room_code_is_404():
@@ -139,6 +139,77 @@ def test_update_name_requires_owner_token(room):
 def test_update_name_rejects_over_20_chars(room):
     resp = client.put(f"/api/rooms/{room['code']}/name", json={"name": "가" * 21}, headers=auth(room))
     assert resp.status_code == 422
+
+
+# --- 방 둘러보기(공개 목록) ---
+
+def make_public(r):
+    resp = client.put(f"/api/rooms/{r['code']}/visibility", json={"public": True}, headers=auth(r))
+    assert resp.status_code == 200
+    return resp
+
+
+def test_rooms_start_private_and_owner_can_toggle(room):
+    assert client.get(f"/api/rooms/{room['code']}").json()["is_public"] is False
+    assert make_public(room).json() == {"is_public": True}
+    assert client.get(f"/api/rooms/{room['code']}").json()["is_public"] is True
+    resp = client.put(f"/api/rooms/{room['code']}/visibility", json={"public": False}, headers=auth(room))
+    assert resp.json() == {"is_public": False}
+
+
+def test_visibility_requires_owner_token(room):
+    resp = client.put(f"/api/rooms/{room['code']}/visibility", json={"public": True})
+    assert resp.status_code == 403
+    assert client.get(f"/api/rooms/{room['code']}").json()["is_public"] is False
+
+
+def test_public_list_shows_only_public_rooms_with_records():
+    shown = client.post("/api/rooms").json()
+    private = client.post("/api/rooms").json()
+    empty = client.post("/api/rooms").json()
+    for r in (shown, private):
+        client.post(f"/api/rooms/{r['code']}/records", json=make_record(), headers=auth(r))
+    client.put(f"/api/rooms/{shown['code']}/name", json={"name": "보여줄 방"}, headers=auth(shown))
+    make_public(shown)
+    make_public(empty)  # 공개여도 기록이 없으면 목록에 안 뜸
+
+    resp = client.get("/api/rooms")
+    assert resp.status_code == 200
+    rooms = resp.json()
+    assert [r["code"] for r in rooms] == [shown["code"]]
+    assert rooms[0]["name"] == "보여줄 방"
+
+
+def test_public_list_counts_by_category_and_hides_secrets(room):
+    for cat in ("book", "book", "movie", "music"):
+        client.post(f"/api/rooms/{room['code']}/records", json=make_record(cat=cat), headers=auth(room))
+    make_public(room)
+    (listed,) = client.get("/api/rooms").json()
+    assert listed["counts"] == {"book": 2, "anime": 0, "movie": 1, "music": 1}
+    assert listed["total"] == 4
+    assert "token" not in listed and "google_email" not in listed
+
+
+def test_public_list_is_ordered_by_latest_record_activity():
+    older = client.post("/api/rooms").json()
+    newer = client.post("/api/rooms").json()
+    client.post(f"/api/rooms/{older['code']}/records", json=make_record(), headers=auth(older))
+    rec = client.post(f"/api/rooms/{newer['code']}/records", json=make_record(), headers=auth(newer)).json()
+    make_public(older)
+    make_public(newer)
+    # updated_at을 직접 당겨서 "older가 더 최근에 고쳐짐"을 만들기보다, 시각을
+    # 정해두고 확인 — SQLite의 now()는 초 단위라 연달아 만들면 같은 시각일 수 있음.
+    from app.database import SessionLocal
+    from app import models
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        db.query(models.Record).filter(models.Record.id == rec["id"]).update({"updated_at": now - timedelta(days=1)})
+        db.query(models.Record).filter(models.Record.id != rec["id"]).update({"updated_at": now})
+        db.commit()
+    finally:
+        db.close()
+    assert [r["code"] for r in client.get("/api/rooms").json()] == [older["code"], newer["code"]]
 
 
 # --- pages: read-only vs owner ---

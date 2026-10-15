@@ -1,4 +1,4 @@
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, StringConstraints
 
@@ -27,6 +27,23 @@ class RoomNameIn(BaseModel):
     빈 문자열이면 이름을 지움(로비 제목이 다시 기본 "로비"로 돌아감)."""
 
     name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)]
+
+
+class RoomVisibilityIn(BaseModel):
+    """PUT .../visibility — "방 둘러보기" 목록에 올릴지(true) 내릴지(false)."""
+
+    public: bool
+
+
+class PublicRoomOut(BaseModel):
+    """GET /api/rooms 목록의 방 하나 — 누구나 볼 수 있는 값만(토큰·구글
+    계정 정보는 절대 안 넣음). counts는 카테고리별 기록 수(없으면 0)."""
+
+    code: str
+    name: Optional[str] = None
+    theme: str
+    counts: Dict[str, int]
+    total: int
 
 
 class GoogleAuthIn(BaseModel):
