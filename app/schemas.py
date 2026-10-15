@@ -46,6 +46,16 @@ class PublicRoomOut(BaseModel):
     total: int
 
 
+class TitleSuggestionOut(BaseModel):
+    """GET .../title-suggestions 후보 하나. creator는 그 제목의 만든 사람이 한
+    명으로 정해질 때만 있음. mine은 이 방에 이미 기록된 제목인지."""
+
+    title: str
+    creator: Optional[str] = None
+    mine: bool
+    rooms: int
+
+
 class GoogleAuthIn(BaseModel):
     """id_token comes from Google Identity Services in the browser.
     current_code/current_token are this browser's existing room (if it

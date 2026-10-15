@@ -109,6 +109,63 @@ def list_public_rooms(db: Session) -> List[dict]:
     return out
 
 
+TITLE_SUGGEST_LIMIT = 8
+# 남의 방 기록은 이 수 이상의 (공개) 방에서 기록된 제목만 후보로 — 한 방에만
+# 있는 오타나 장난 제목이 다른 사람 자동 완성에 퍼지지 않게.
+TITLE_SUGGEST_MIN_ROOMS = 2
+
+
+def _norm(s: Optional[str]) -> str:
+    return " ".join((s or "").split()).lower()
+
+
+def title_suggestions(db: Session, room: models.Room, cat: str, q: str) -> List[dict]:
+    """기록 추가 창의 제목 자동 완성 — 이 방의 기록 + 공개된 방의 기록 중 제목에
+    q가 들어간 것. 같은 제목(공백·대소문자 무시)은 하나로 묶음.
+    - 남의 방에서만 나온 제목은 TITLE_SUGGEST_MIN_ROOMS개 이상의 방에 있어야 함.
+    - creator는 그 제목으로 기록된 만든 사람이 딱 한 명일 때만(동명의 다른 작품이
+      섞여 있으면 None — 프론트는 비어 있는 칸에만 채움).
+    - 정렬: q로 시작하는 제목 먼저, 그다음 많이 기록된 순."""
+    q = _norm(q)
+    if not q:
+        return []
+    rows = (
+        db.query(models.Record.title, models.Record.creator, models.Record.room_id)
+        .join(models.Room, models.Room.id == models.Record.room_id)
+        .filter(models.Record.cat == cat)
+        .filter(func.lower(models.Record.title).contains(q))
+        .filter((models.Record.room_id == room.id) | (models.Room.is_public.is_(True)))
+        .limit(2000)
+        .all()
+    )
+    groups: Dict[str, dict] = {}
+    for title, creator, room_id in rows:
+        key = _norm(title)
+        if not key:
+            continue
+        g = groups.setdefault(key, {"titles": {}, "creators": {}, "rooms": set(), "mine": False})
+        g["titles"][title] = g["titles"].get(title, 0) + 1
+        if _norm(creator):
+            g["creators"].setdefault(_norm(creator), creator.strip())
+        g["rooms"].add(room_id)
+        if room_id == room.id:
+            g["mine"] = True
+
+    out = []
+    for key, g in groups.items():
+        others = len(g["rooms"] - {room.id})
+        if not g["mine"] and others < TITLE_SUGGEST_MIN_ROOMS:
+            continue
+        # 표기가 갈리면(띄어쓰기 등) 가장 많이 쓰인 표기를 보여줌.
+        title = max(g["titles"].items(), key=lambda kv: kv[1])[0]
+        creator = next(iter(g["creators"].values())) if len(g["creators"]) == 1 else None
+        out.append({"title": title, "creator": creator, "mine": g["mine"], "rooms": len(g["rooms"]), "_prefix": key.startswith(q)})
+    out.sort(key=lambda s: (not s["_prefix"], -s["rooms"], s["title"]))
+    for s in out:
+        del s["_prefix"]
+    return out[:TITLE_SUGGEST_LIMIT]
+
+
 def get_room_by_google_sub(db: Session, sub: str) -> Optional[models.Room]:
     return db.query(models.Room).filter(models.Room.google_sub == sub).first()
 
