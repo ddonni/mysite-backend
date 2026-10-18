@@ -16,7 +16,10 @@ config = context.config
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # The app runs migrations inside uvicorn's startup, so the default
+    # disable_existing_loggers=True would silence uvicorn's own loggers
+    # (no access log, no startup-failure traceback) for the whole process.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # DATABASE_URL is the single source of truth for the connection string
 # everywhere else in this app (see app/database.py) — read it the same way
