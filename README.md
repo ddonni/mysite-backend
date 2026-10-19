@@ -44,21 +44,31 @@ docker compose up --build
 
 `.env.example`을 `.env`로 복사해서 값을 바꿀 수 있음(docker-compose가 자동으로 읽음).
 
-## 배포 (Render)
+## 배포 (직접 운영하는 EC2)
 
-`render.yaml`이 API 서비스를 정의해둔 Render Blueprint. Render
-대시보드에서 "New +" → "Blueprint"로 이 GitHub 레포를 연결하면 서비스가
-자동으로 생성되고, 이후 `main`에 push할 때마다 자동 배포됨.
+2026-10-18부터 AWS 서울 리전의 EC2 한 대에서 직접 운영함
+(`https://mysite-ddonni.duckdns.org`). 그 전에는 Render(무료) + Neon(무료 PostgreSQL)이었음.
+서버 구성, 선택 근거, 전환 절차, 장애 실험 기록은
+[mysite-infra](https://github.com/ddonni/mysite-infra) 저장소에 있음.
 
-DB는 [Neon](https://neon.tech)의 무료 PostgreSQL을 씀(Render 무료 DB는
-30일 뒤 만료돼서 옮김). Neon 대시보드의 연결 주소에서 호스트의 `-pooler`를
-뺀 직접 연결 주소(`...?sslmode=require`)를 Render 대시보드 →
-`sketchbook-api` → Environment 탭의 `DATABASE_URL`에 넣으면 됨.
+```
+브라우저 ──HTTPS/WSS──▶ Nginx(:443, Let's Encrypt) ──▶ uvicorn(127.0.0.1:8000, systemd)
+                                                         ├──▶ PostgreSQL 18 (같은 서버, 127.0.0.1)
+                                                         └──▶ S3 사진 버킷 (EC2 역할, 키 없음)
+```
+
+- 앱은 systemd 서비스로, 로그인할 수 없는 전용 계정으로 실행함. 죽으면 자동으로 다시 뜸.
+- 환경 변수는 서버의 root 전용 파일(600)에 있음. AWS 키는 쓰지 않고 EC2 역할로 S3에 접근함.
+- DB는 매일 S3로 백업하고, 복원 훈련까지 해 봄.
+- 배포는 지금 수동임: 서버에서 `git pull` → (의존성이 바뀌었으면 `pip install`) →
+  `systemctl restart`. GitHub Actions로 자동화하는 건 다음 단계.
+
+`render.yaml`은 롤백용으로 남겨 둔 예전 Render 설정임(병행 운영이 끝나면 정리).
 
 스키마 변경은 [Alembic](https://alembic.sqlalchemy.org/)으로 관리함
 (`alembic/versions/`). 기동할 때마다 `app/migrations.py`가 자동으로
-`alembic upgrade head`를 실행하므로, 새 리비전을 추가해서 push하면
-그걸로 끝 — 별도 수동 배포 단계 없음. 새 컬럼 등을 추가할 땐:
+`alembic upgrade head`를 실행하므로, 서버에 새 코드를 받고 재시작하면
+마이그레이션도 같이 적용됨. 새 컬럼 등을 추가할 땐:
 
 ```bash
 docker compose up -d db
@@ -70,21 +80,22 @@ DATABASE_URL=postgresql+psycopg2://sketchbook:sketchbook@localhost:5432/sketchbo
 
 기록 보관소의 사진 업로드를 쓰려면 S3 버킷도 하나 필요함:
 
-1. AWS에 S3 버킷 생성 (리전 아무거나, 나중에 `AWS_REGION`에 맞춰 적으면 됨).
-2. 버킷 정책으로 `GetObject`를 퍼블릭 허용 (업로드된 사진 URL이 그대로
-   `<img>` 태그에서 로딩돼야 하므로 — "Block all public access" 해제 필요).
-3. 그 버킷에만 `PutObject` 권한을 가진 IAM 사용자를 만들고 액세스 키 발급.
-4. Render 대시보드 → `sketchbook-api` → Environment 탭에서
-   `S3_BUCKET_NAME`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`,
-   `AWS_SECRET_ACCESS_KEY` 네 값을 채워 넣기 (`render.yaml`에는
-   `sync: false`로만 선언돼 있어 git에는 값이 올라가지 않음).
+1. 앱 서버와 같은 리전에 S3 버킷 생성 (운영: `mysite-photos-ddonni`, 서울).
+2. 버킷 정책으로 **`records/*`만** `GetObject`를 퍼블릭 허용 (업로드된 사진 URL이
+   그대로 `<img>` 태그에서 로딩돼야 하므로). 퍼블릭 액세스 차단은 ACL 관련 두 개만
+   켜 두고, 버킷 정책 관련 두 개를 끔.
+3. 앱이 도는 곳에 업로드 권한 주기 — 앱이 하는 일은 `records/<uuid>.<확장자>`로
+   `put_object` 하나뿐이라 `s3:PutObject` on `arn:aws:s3:::<버킷>/records/*`면 충분함.
+   - **EC2(운영)**: 인스턴스 역할에 이 정책을 붙임. 액세스 키는 필요 없음.
+   - 키가 필요한 환경(로컬 docker 등): 같은 권한만 가진 IAM 사용자의 키를
+     `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`로 넣음(`.env`, git에 올리지 않음).
+4. `S3_BUCKET_NAME`, `AWS_REGION`을 환경 변수로 넣음.
 
 구글 계정으로 방 복구 기능을 쓰려면 `GOOGLE_CLIENT_ID`도 필요함:
 
 1. Google Cloud Console에서 OAuth 2.0 클라이언트 ID(웹 애플리케이션)를
    발급.
-2. Render 대시보드 → `sketchbook-api` → Environment 탭에서
-   `GOOGLE_CLIENT_ID` 값 채우기(이것도 `sync: false`라 git에는 안 올라감).
+2. 서버 환경 변수에 `GOOGLE_CLIENT_ID` 값을 넣기(git에는 올리지 않음).
 3. `mysite` 레포의 `js/shared/config.js`에 있는 프론트엔드 client_id와
    반드시 같은 값이어야 함.
 4. 안 채워도 나머지 기능은 그대로 동작함(`POST /api/auth/google`만 실패).
@@ -92,11 +103,11 @@ DATABASE_URL=postgresql+psycopg2://sketchbook:sketchbook@localhost:5432/sketchbo
 ## 프론트엔드와 연결하기
 
 1. `CORS_ORIGINS` 환경 변수에 프론트엔드가 서비스되는 실제 주소를 넣기
-   (쉼표로 여러 개 가능). 현재 `render.yaml`에는
-   `https://ddonni.github.io`로 들어가 있음. 변수를 아예 비워두면 코드
-   기본값인 `*`(모두 허용)가 적용됨.
+   (쉼표로 여러 개 가능). 운영 값은 `https://ddonni.github.io`. 변수를 아예
+   비워두면 코드 기본값인 `*`(모두 허용)가 적용됨.
 2. `mysite` 레포의 `js/shared/config.js`에 있는 `API_BASE`를 이 서버의
-   배포된 주소(`https://sketchbook-api.onrender.com` 형태)로 맞추기.
+   배포된 주소(운영: `https://mysite-ddonni.duckdns.org`)로 맞추기.
+   WebSocket 주소도 이 값에서 만들어짐(`https` → `wss`).
    스케치북·기록 보관소·로비가 모두 이 값 하나를 같이 씀. localhost에서
    열면 자동으로 `http://localhost:8000`을 봄.
 

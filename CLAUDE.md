@@ -55,16 +55,39 @@
 - **Docker + docker-compose** — `api` 컨테이너 + `db`(Postgres) 컨테이너.
 - **GitHub Actions** (`.github/workflows/ci.yml`) — push마다 pytest 실행 →
   통과하면 Docker 이미지 빌드해서 `ghcr.io/<owner>/sketchbook-api`에 푸시
-  (참고용 빌드일 뿐, 실제 배포는 아래 Render가 소스에서 직접 빌드).
+  (참고용 빌드일 뿐, 운영 서버는 이미지를 쓰지 않고 소스를 직접 받아 돌림).
 
-배포 호스트는 **Render**(API 서비스), DB는 **Neon**(무료 PostgreSQL, 만료
-없음). `render.yaml`(Blueprint)이 API 서비스를 정의하고, `main` push마다
-자동 재배포됨. `DATABASE_URL`은 Neon의 풀러 없는 직접 연결 주소
-(`?sslmode=require`)를 Render 대시보드에서 직접 넣음(`sync: false`) — 2026-09-27에
-Render 무료 DB에서 옮겼고, 예전 Render DB는 만료 후 삭제함. S3 관련 4개 변수
-(`S3_BUCKET_NAME`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`)는 `render.yaml`에 `sync: false`로만 선언돼
-있고 실제 값은 Render 대시보드 Environment 탭에서 수동으로 채워야 함.
+**운영 호스트: 직접 운영하는 EC2 한 대** (2026-10-18 Render에서 전환). 구성·
+절차·장애 기록은 `mysite-infra` 저장소(README, CUTOVER.md, TROUBLESHOOTING.md)에 있음.
+
+- 주소 `https://mysite-ddonni.duckdns.org` (서울 `ap-northeast-2`, Nginx + Let's Encrypt
+  → `127.0.0.1:8000`의 uvicorn). systemd 서비스 `mysite-backend`, 로그인 불가 계정
+  `mysite`로 실행, 코드는 `/opt/mysite-backend`(root 소유, git clone).
+- DB는 **같은 서버의 PostgreSQL 18**(`127.0.0.1`만 들음, 앱 롤 `mysite`가 DB 소유자).
+  `DATABASE_URL`에 `?sslmode=disable`을 붙임 — 같은 서버 안의 연결이고, systemd의
+  `ProtectHome` 때문에 libpq의 SSL 시도가 매번 실패하던 걸 없앰.
+- 환경변수는 `/etc/mysite/backend.env`(root 600). **AWS 키는 없음** — EC2 역할의
+  임시 자격 증명을 boto3가 알아서 씀.
+- 사진 버킷은 `mysite-photos-ddonni`(서울, 이 계정). 역할 권한은 `records/*`
+  `PutObject`뿐이라 키 접두사(`records/`)를 바꾸면 업로드가 막힘. 예전 사진은
+  `mysite-buckets`(시드니, 다른 계정)에 남아 있고 DB에 전체 URL로 저장돼 있어서 그대로 보임.
+- 매일 03:30 `pg_dump` → 비공개 버킷 `mysite-backups-ddonni`(14일 보관).
+- **배포는 지금 수동** (`main` push만으로는 운영에 안 올라감):
+  ```bash
+  sudo git -C /opt/mysite-backend pull
+  sudo /opt/mysite-backend/.venv/bin/pip install -r /opt/mysite-backend/requirements.txt   # 의존성이 바뀌었을 때
+  sudo systemctl restart mysite-backend
+  sudo journalctl -u mysite-backend -n 10 --no-pager    # "Application startup complete"
+  ```
+  새 마이그레이션은 재시작할 때 자동 적용됨. 서버 코드가 DB보다 오래되면(DB에 모르는
+  리비전이 있으면) 앱이 무한 재시작하니, 코드를 먼저 최신으로 맞출 것.
+- 운영에서 겪고 고친 것: `alembic/env.py`의 `fileConfig`가 uvicorn 로그를 꺼 버리던 문제
+  (`disable_existing_loggers=False`), PostgreSQL 재시작 뒤 첫 요청 500
+  (`create_engine(..., pool_pre_ping=True)`). 둘 다 지우면 안 됨.
+
+**Render + Neon은 롤백용으로만 남아 있음** (병행 운영이 끝나면 정리 예정). Render는
+`main` push 때 여전히 배포될 수 있지만 프런트가 더는 그쪽을 보지 않음. `render.yaml`,
+Neon 관련 설명은 그때 함께 정리함.
 
 ## 빌드/테스트 명령
 
@@ -82,9 +105,9 @@ DATABASE_URL=postgresql+psycopg2://sketchbook:sketchbook@localhost:5432/sketchbo
 ```
 
 생성된 파일은 리뷰 없이 그대로 커밋하지 말 것 — autogenerate가 의도치
-않은 변경(예: 무관한 인덱스 재생성)을 같이 잡아낼 수 있음. `main` push
-시 `run_startup_migrations`가 자동으로 `alembic upgrade head`를 실행하므로
-별도의 수동 배포 단계는 없음.
+않은 변경(예: 무관한 인덱스 재생성)을 같이 잡아낼 수 있음. 앱이 기동할 때
+`run_startup_migrations`가 자동으로 `alembic upgrade head`를 실행하므로, 운영
+서버에서 코드를 받고 재시작하면 마이그레이션도 같이 적용됨(위 "배포" 참고).
 
 ## 저장소 구조
 
@@ -133,6 +156,9 @@ tests/test_api.py
   `/api/rooms/{code}/records`로 보내지 않는다.
 - `CORS_ORIGINS` 환경 변수로 허용 도메인 제어. 현재 값은 배포된 프론트
   주소(`https://ddonni.github.io`)로 좁혀져 있음.
+- 방 생성 횟수 제한은 `X-Forwarded-For`의 **첫 번째 값**을 방문자 IP로 씀. 그래서
+  운영 Nginx는 이 헤더를 `$remote_addr`로 **덮어씀**(덧붙이면 방문자가 위조 가능).
+  프록시 구성을 바꿀 때 이 전제를 유지할 것.
 - `GOOGLE_CLIENT_ID` 환경 변수(선택)로 구글 계정 방 복구 기능을 검증함
   — 비어 있으면 `google_auth.verify_id_token`이 실패해서 그 기능만
   400으로 막히고 나머지는 평소대로 동작함. `mysite`의
