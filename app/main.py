@@ -80,8 +80,14 @@ manager = ConnectionManager()
 # A per-IP fixed-window counter in process memory is enough at this site's
 # scale (Render free tier runs a single instance, and rooms are only ever
 # shared with a handful of people) — no Redis needed.
+#
+# 한도는 "한 사람"이 아니라 "공인 IP 하나" 기준이라는 점에 주의 — 학원·회사처럼
+# 여러 PC가 공유기(NAT) 뒤에서 공인 IP 하나로 나가면 다 같은 IP로 보임. 처음
+# 온 사람은 페이지를 열자마자 방이 만들어지니(프론트 getMyRoom), 예전 한도
+# 5개였으면 학원 단톡방에 링크를 올렸을 때 6번째 사람부터 로비가 "서버에 연결할
+# 수 없어요"로 떴을 것. 30명이 한두 번씩 만들어도 남게 50으로 둠.
 _room_creations: Dict[str, List[datetime]] = {}
-ROOM_CREATE_LIMIT = 5
+ROOM_CREATE_LIMIT = 50
 ROOM_CREATE_WINDOW = timedelta(hours=1)
 
 

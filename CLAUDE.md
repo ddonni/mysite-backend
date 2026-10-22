@@ -164,7 +164,8 @@ tests/test_api.py
   ```bash
   sudo -u postgres psql -d mysite -c "SELECT id, created_at AT TIME ZONE 'Asia/Seoul' AS kst, name, page, room_code, message FROM feedback ORDER BY id DESC LIMIT 20;"
   ```
-- 방 생성·피드백 횟수 제한은 `X-Forwarded-For`의 **첫 번째 값**을 방문자 IP로 씀. 그래서
+- 방 생성(IP당 한 시간 50개)·피드백(60개) 횟수 제한은 `X-Forwarded-For`의 **첫 번째 값**을 방문자 IP로 씀.
+  공유기(NAT) 뒤의 여러 PC는 같은 IP로 보이므로 한도를 낮추면 학원·회사에서 함께 들어올 때 막힘. 그래서
   운영 Nginx는 이 헤더를 `$remote_addr`로 **덮어씀**(덧붙이면 방문자가 위조 가능).
   프록시 구성을 바꿀 때 이 전제를 유지할 것.
 - `GOOGLE_CLIENT_ID` 환경 변수(선택)로 구글 계정 방 복구 기능을 검증함
