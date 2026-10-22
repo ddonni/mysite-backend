@@ -114,7 +114,7 @@ DATABASE_URL=postgresql+psycopg2://sketchbook:sketchbook@localhost:5432/sketchbo
 ```
 app/
   main.py       # FastAPI 앱, CORS, WebSocket ConnectionManager, 모든 라우트
-  models.py     # SQLAlchemy 모델 (Room, Page, Record)
+  models.py     # SQLAlchemy 모델 (Room, Page, Record, Feedback)
   schemas.py    # Pydantic 스키마
   crud.py       # DB 접근 로직, 방 코드/토큰 생성
   storage.py    # S3 사진 업로드
@@ -145,6 +145,8 @@ tests/test_api.py
   하면(`PUT .../records/{id}/playing`) 400 `"not_music"`. 업로드(`POST .../uploads`)는 이미지 형식이
   아니면(SVG 포함) 415 `"unsupported file type"`, 10MB를 넘으면 413
   `"file too large"`(프론트는 지금 이 둘을 일반 저장 실패로만 안내함).
+  피드백(`POST /api/feedback`)이 IP당 한 시간 60개를 넘으면 429
+  `"too many feedback, try again later"`(프론트는 상태 코드 429로만 구분함).
   이 문자열을 바꾸면 `mysite`의 프론트 코드도 같이 고쳐야 함.
 - `PUT /api/rooms/{code}/pages/{n}`은 부분 수정이 아니라 해당 페이지의
   `strokes` 전체를 교체하는 API. 저장 성공 시 같은 (room, page)를 보고
@@ -156,7 +158,13 @@ tests/test_api.py
   `/api/rooms/{code}/records`로 보내지 않는다.
 - `CORS_ORIGINS` 환경 변수로 허용 도메인 제어. 현재 값은 배포된 프론트
   주소(`https://ddonni.github.io`)로 좁혀져 있음.
-- 방 생성 횟수 제한은 `X-Forwarded-For`의 **첫 번째 값**을 방문자 IP로 씀. 그래서
+- `POST /api/feedback`(토큰 없이 누구나)은 사이트의 "의견 보내기"를 `feedback`
+  테이블에 저장만 함 — `message`(1~1000자), `name`(선택, 30자), 맥락용 `page`·`room_code`.
+  **읽는 API는 일부러 없음**(관리자 인증을 따로 만들지 않으려고). 운영 서버에서 이렇게 봄:
+  ```bash
+  sudo -u postgres psql -d mysite -c "SELECT id, created_at AT TIME ZONE 'Asia/Seoul' AS kst, name, page, room_code, message FROM feedback ORDER BY id DESC LIMIT 20;"
+  ```
+- 방 생성·피드백 횟수 제한은 `X-Forwarded-For`의 **첫 번째 값**을 방문자 IP로 씀. 그래서
   운영 Nginx는 이 헤더를 `$remote_addr`로 **덮어씀**(덧붙이면 방문자가 위조 가능).
   프록시 구성을 바꿀 때 이 전제를 유지할 것.
 - `GOOGLE_CLIENT_ID` 환경 변수(선택)로 구글 계정 방 복구 기능을 검증함

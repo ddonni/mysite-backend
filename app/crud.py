@@ -362,3 +362,12 @@ def delete_record(db: Session, room_id: int, record_id: int) -> bool:
     db.delete(record)
     db.commit()
     return True
+
+
+def create_feedback(db: Session, data: dict) -> models.Feedback:
+    data["name"] = data.get("name") or None  # 빈 문자열은 "이름 없음"으로 저장
+    feedback = models.Feedback(**data)
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return feedback

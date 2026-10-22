@@ -154,3 +154,14 @@ class RecordPlayingIn(BaseModel):
 
 class UploadOut(BaseModel):
     url: str
+
+
+class FeedbackIn(BaseModel):
+    """POST /api/feedback — 앞뒤 공백을 자른 뒤 내용은 1~1000자, 이름은
+    30자까지(빈 문자열이면 이름 없음). page는 보낸 화면의 경로(예:
+    "/mysite/library"), room_code는 그때 보던 방 — 둘 다 맥락용이라 선택."""
+
+    message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+    name: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=30)]] = None
+    page: Optional[Annotated[str, StringConstraints(max_length=200)]] = None
+    room_code: Optional[Annotated[str, StringConstraints(max_length=10)]] = None

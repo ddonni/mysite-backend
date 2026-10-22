@@ -11,7 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database import Base, engine
-from app.main import ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW, _room_creations, app
+from app import models
+from app.database import SessionLocal
+from app.main import FEEDBACK_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW, _feedback_posts, _room_creations, app
 
 client = TestClient(app)
 
@@ -28,6 +30,7 @@ def fresh_database():
     # room-creation rate limit (see app.main) must reset per test too — same
     # reasoning as resetting the database.
     _room_creations.clear()
+    _feedback_posts.clear()
     yield
     Base.metadata.drop_all(bind=engine)
 
@@ -762,3 +765,46 @@ def test_google_relink_after_unlink_works(room, monkeypatch):
     resp = client.post("/api/auth/google", json=link)
     assert resp.status_code == 200
     assert resp.json()["linked_new"] is True
+
+
+# --- feedback (POST /api/feedback) ---
+
+def saved_feedback():
+    db = SessionLocal()
+    try:
+        return db.query(models.Feedback).all()
+    finally:
+        db.close()
+
+
+def test_feedback_is_saved_without_a_token():
+    resp = client.post("/api/feedback", json={
+        "message": "  캔버스 색을 RGB로 고르고 싶어요  ", "name": "  민기 ", "page": "/mysite/sketchbook", "room_code": "TTHB8N",
+    })
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    [fb] = saved_feedback()
+    assert (fb.message, fb.name, fb.page, fb.room_code) == ("캔버스 색을 RGB로 고르고 싶어요", "민기", "/mysite/sketchbook", "TTHB8N")
+    assert fb.created_at is not None
+
+
+def test_feedback_blank_name_is_stored_as_none():
+    client.post("/api/feedback", json={"message": "좋아요", "name": "   "})
+    [fb] = saved_feedback()
+    assert fb.name is None
+
+
+def test_feedback_rejects_blank_or_too_long_message():
+    assert client.post("/api/feedback", json={"message": "   "}).status_code == 422
+    assert client.post("/api/feedback", json={"message": "가" * 1001}).status_code == 422
+    assert saved_feedback() == []
+
+
+def test_feedback_is_rate_limited_per_ip():
+    for _ in range(FEEDBACK_LIMIT):
+        assert client.post("/api/feedback", json={"message": "hi"}).status_code == 200
+    resp = client.post("/api/feedback", json={"message": "hi"})
+    assert resp.status_code == 429
+    assert resp.json()["detail"] == "too many feedback, try again later"
+    # 방 만들기 제한과는 따로 셈
+    assert client.post("/api/rooms").status_code == 200

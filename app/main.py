@@ -96,18 +96,31 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _check_room_rate_limit(request: Request) -> None:
+def _check_rate_limit(request: Request, log: Dict[str, List[datetime]], limit: int, window: timedelta, detail: str) -> None:
     ip = _client_ip(request)
     now = datetime.now(timezone.utc)
-    # 창(ROOM_CREATE_WINDOW)이 지난 IP는 통째로 지움 — 안 그러면 한 번이라도
-    # 방을 만든 IP마다 빈 목록이 프로세스가 살아 있는 내내 쌓여감.
-    for other in [k for k, ts in _room_creations.items() if not ts or now - ts[-1] >= ROOM_CREATE_WINDOW]:
-        del _room_creations[other]
-    recent = [t for t in _room_creations.get(ip, []) if now - t < ROOM_CREATE_WINDOW]
-    if len(recent) >= ROOM_CREATE_LIMIT:
-        raise HTTPException(status_code=429, detail="too many rooms created, try again later")
+    # 창(window)이 지난 IP는 통째로 지움 — 안 그러면 한 번이라도 요청한
+    # IP마다 빈 목록이 프로세스가 살아 있는 내내 쌓여감.
+    for other in [k for k, ts in log.items() if not ts or now - ts[-1] >= window]:
+        del log[other]
+    recent = [t for t in log.get(ip, []) if now - t < window]
+    if len(recent) >= limit:
+        raise HTTPException(status_code=429, detail=detail)
     recent.append(now)
-    _room_creations[ip] = recent
+    log[ip] = recent
+
+
+def _check_room_rate_limit(request: Request) -> None:
+    _check_rate_limit(request, _room_creations, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW,
+                      "too many rooms created, try again later")
+
+
+# 피드백도 로그인 없이 누구나 보낼 수 있어서 방 만들기와 같은 방식으로 막음.
+# 한도가 공인 IP 기준인 것도 같음(위 방 만들기 설명) — 한 학원에서 30명이
+# 한두 개씩 보내도 남게 60으로 둠.
+_feedback_posts: Dict[str, List[datetime]] = {}
+FEEDBACK_LIMIT = 60
+FEEDBACK_WINDOW = timedelta(hours=1)
 
 
 def _token_matches(given: Optional[str], real: str) -> bool:
@@ -143,6 +156,16 @@ def create_room(request: Request, db: Session = Depends(get_db)):
     _check_room_rate_limit(request)
     room = crud.create_room(db)
     return {"code": room.code, "token": room.token}
+
+
+@app.post("/api/feedback")
+def send_feedback(body: schemas.FeedbackIn, request: Request, db: Session = Depends(get_db)):
+    """모든 페이지의 "의견 보내기" — 저장만 하고 돌려주는 건 없음. 읽는 API는
+    일부러 안 만듦(운영자가 서버에서 psql로 봄)."""
+    _check_rate_limit(request, _feedback_posts, FEEDBACK_LIMIT, FEEDBACK_WINDOW,
+                      "too many feedback, try again later")
+    crud.create_feedback(db, body.model_dump())
+    return {"ok": True}
 
 
 @app.get("/api/rooms", response_model=List[schemas.PublicRoomOut])
