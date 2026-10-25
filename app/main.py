@@ -212,22 +212,33 @@ def google_auth_resolve(body: schemas.GoogleAuthIn, db: Session = Depends(get_db
     그대로 돌려주고(=복구), 아직 아무 방에도 연결 안 돼 있으면 요청에 실려
     온 현재 방(current_code/current_token, 소유자 토큰으로 증명됨)에
     이 계정을 새로 연결함. 어느 쪽도 안 되면(연결된 방도 없고, 넘어온
-    현재 방 정보도 없거나 틀림) 404."""
+    현재 방 정보도 없거나 틀림) 404.
+
+    복구할 때 현재 방이 연결된 방과 다르면 current_empty로 현재 방이
+    비었는지도 알려줌 — 새 브라우저가 저절로 만든 빈 방이면 프론트가 묻지
+    않고 바로 넘어가고, 기록이 있으면 두고 간다는 걸 경고하게."""
     try:
         claims = google_auth.verify_id_token(body.id_token)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid google token")
     sub = claims["sub"]
 
+    current = None
+    if body.current_code and body.current_token:
+        found = crud.get_room_by_code(db, body.current_code)
+        if found is not None and _token_matches(body.current_token, found.token):
+            current = found
+
     linked = crud.get_room_by_google_sub(db, sub)
     if linked is not None:
-        return {"code": linked.code, "token": linked.token, "linked_new": False}
+        current_empty = None
+        if current is not None and current.id != linked.id:
+            current_empty = crud.is_room_empty(db, current.id)
+        return {"code": linked.code, "token": linked.token, "linked_new": False, "current_empty": current_empty}
 
-    if body.current_code and body.current_token:
-        current = crud.get_room_by_code(db, body.current_code)
-        if current is not None and _token_matches(body.current_token, current.token):
-            crud.set_google_sub(db, current, sub, claims.get("email"))
-            return {"code": current.code, "token": current.token, "linked_new": True}
+    if current is not None:
+        crud.set_google_sub(db, current, sub, claims.get("email"))
+        return {"code": current.code, "token": current.token, "linked_new": True}
 
     raise HTTPException(status_code=404, detail="no room linked to this google account")
 

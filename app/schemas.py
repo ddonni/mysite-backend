@@ -72,6 +72,12 @@ class GoogleAuthOut(BaseModel):
     # True the first time a Google account gets linked to a room (so the
     # frontend can tell "just connected" apart from "found your room").
     linked_new: bool
+    # Only set when recovering a different room than the one this browser
+    # sent as current_code/current_token (proven by its token): whether that
+    # current room is still empty, so the frontend can switch without asking
+    # (nothing to lose) or warn before the switch (its records would be left
+    # behind). None in every other case.
+    current_empty: Optional[bool] = None
 
 
 class GoogleStatusOut(BaseModel):

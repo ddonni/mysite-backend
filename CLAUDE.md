@@ -173,6 +173,10 @@ tests/test_api.py
   400으로 막히고 나머지는 평소대로 동작함. `mysite`의
   `js/shared/config.js`에 있는 `GOOGLE_CLIENT_ID`와 반드시 같은 값이어야
   함(둘 다 Google Cloud Console에서 발급한 같은 OAuth client id).
+  복구 응답의 `current_empty`는 요청의 current_code/current_token이 **토큰까지 맞고**
+  복구하는 방과 다를 때만 채움(기록도 그림도 없으면 true, `crud.is_room_empty`) —
+  프론트가 새 브라우저의 빈 방이면 묻지 않고 넘어가는 데 씀. 토큰 없이 남의 방이
+  비었는지 알아낼 수 없게 하려는 것이라 이 조건을 풀지 말 것.
 - **스키마 변경은 전부 Alembic 리비전으로 한다** (`alembic/versions/`).
   `main.py`의 lifespan이 Postgres일 때 `migrations.py`를 통해 시작 시마다
   `alembic upgrade head`를 실행함 — 예전처럼 `app/migrations.py`에

@@ -666,7 +666,7 @@ def test_google_auth_links_current_room_first_time(room, monkeypatch):
     })
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"code": room["code"], "token": room["token"], "linked_new": True}
+    assert body == {"code": room["code"], "token": room["token"], "linked_new": True, "current_empty": None}
 
 
 def test_google_auth_recovers_already_linked_room(room, monkeypatch):
@@ -679,7 +679,61 @@ def test_google_auth_recovers_already_linked_room(room, monkeypatch):
     resp = client.post("/api/auth/google", json={"id_token": "fake"})
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"code": room["code"], "token": room["token"], "linked_new": False}
+    assert body == {"code": room["code"], "token": room["token"], "linked_new": False, "current_empty": None}
+
+
+def link_google(r):
+    client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": r["code"], "current_token": r["token"],
+    })
+
+
+def test_google_auth_recover_from_new_empty_room_says_current_empty(room, monkeypatch):
+    # 새 브라우저 시나리오: 로비를 여는 순간 빈 방이 저절로 생긴 뒤 로그인함.
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    link_google(room)
+    fresh = client.post("/api/rooms").json()
+
+    resp = client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": fresh["code"], "current_token": fresh["token"],
+    })
+    assert resp.json() == {"code": room["code"], "token": room["token"], "linked_new": False, "current_empty": True}
+
+
+def test_google_auth_recover_from_room_with_records_says_not_empty(room, monkeypatch):
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    link_google(room)
+    other = client.post("/api/rooms").json()
+    client.post(f"/api/rooms/{other['code']}/records", json=make_record(), headers=auth(other))
+
+    resp = client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": other["code"], "current_token": other["token"],
+    })
+    assert resp.json()["current_empty"] is False
+
+
+def test_google_auth_recover_from_room_with_drawing_says_not_empty(room, monkeypatch):
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    link_google(room)
+    other = client.post("/api/rooms").json()
+    client.put(f"/api/rooms/{other['code']}/pages/1", json={"strokes": [make_stroke("a")]}, headers=auth(other))
+
+    resp = client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": other["code"], "current_token": other["token"],
+    })
+    assert resp.json()["current_empty"] is False
+
+
+def test_google_auth_current_empty_needs_the_real_current_token(room, monkeypatch):
+    # 남의 방 코드만 알아서는 그 방이 비었는지 알아낼 수 없어야 함.
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    link_google(room)
+    other = client.post("/api/rooms").json()
+
+    resp = client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": other["code"], "current_token": "wrong",
+    })
+    assert resp.json()["current_empty"] is None
 
 
 def test_google_auth_invalid_token_is_400(monkeypatch):

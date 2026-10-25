@@ -184,6 +184,15 @@ def set_google_sub(db: Session, room: models.Room, sub: str, email: Optional[str
     return room
 
 
+def is_room_empty(db: Session, room_id: int) -> bool:
+    """No records and no strokes on any page — i.e. the room a new browser
+    creates on its own before the visitor has done anything in it."""
+    if db.query(models.Record.id).filter(models.Record.room_id == room_id).first() is not None:
+        return False
+    pages = db.query(models.Page.strokes).filter(models.Page.room_id == room_id).all()
+    return all(not strokes for (strokes,) in pages)
+
+
 def get_count(db: Session, room_id: int) -> int:
     return db.query(func.count(models.Page.id)).filter(models.Page.room_id == room_id).scalar() or 0
 
