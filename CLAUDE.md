@@ -200,6 +200,10 @@ tests/test_api.py
   Director, TV는 aggregate_credits에서 Series/Chief Director를 먼저, 없으면 첫 Director).
   포스터(image.tmdb.org)는 CORS를 줘서 중계 안 함. 한도는 책·음악과 따로 IP당 한 시간 600번
   (감독 조회 포함). 비상업 무료 — 프론트가 "정보 제공: TMDB" + 보증 아님 문구를 띄움.
+- 음악 가수 검색: `GET /api/search/music?q=&by=artist`(가수 칸)는 일반 검색이 앨범을 3개까지만
+  줘서, 검색 결과 앨범에 붙은 가수 id(맨 위 "가수" 카드는 ytmusicapi가 이름·id를 못 읽을 때가
+  있음)로 `get_artist`를 열어 앨범→싱글 순 최대 12개(`music_search.search_artist`). 가수를 못
+  찾거나 가수 페이지가 실패하면 일반 검색 결과로 대신함.
 - 음악 검색: `GET /api/search/music?q=`는 **비공식** ytmusicapi로 유튜브 뮤직을 검색해
   `[{album, song, creator, kind, year, cover}]`를 돌려줌(`app/music_search.py`). 키는 없지만
   유튜브가 응답 형식을 바꾸면 언제든 깨질 수 있어서 실패는 전부 503(프론트는 결과 없음으로).

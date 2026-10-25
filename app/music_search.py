@@ -57,6 +57,10 @@ def _search(query: str, auth_file: Optional[str]) -> list:
     return _client(auth_file).search(query)
 
 
+def _artist(channel_id: str) -> dict:
+    return _client(None).get_artist(channel_id)
+
+
 def _cover(result: dict) -> Optional[str]:
     thumbs = result.get("thumbnails") or []
     return thumbs[-1].get("url") if thumbs else None
@@ -99,9 +103,55 @@ def search_music(query: str) -> List[dict]:
         except Exception as e:
             raise SearchUnavailable(str(e))
 
+    return _items(results)
+
+
+def _items(results: list) -> List[dict]:
     out = []
     for r in results:
         item = _to_item(r)
         if item and (item["album"] or item["song"]):
             out.append(item)
     return out[:MAX_RESULTS]
+
+
+ARTIST_MAX_RESULTS = 12
+
+
+def search_artist(query: str) -> List[dict]:
+    """가수 이름으로 찾기(가수 칸) — 일반 검색은 앨범을 3개까지만 줘서, 그 가수의
+    페이지(get_artist)에서 앨범·싱글 목록을 가져옴(앨범 먼저). 가수는 검색 결과
+    앨범에 붙은 가수 id로 찾음 — 맨 위 "가수" 결과 카드는 ytmusicapi가 이름·id를
+    못 읽는 일이 있어서(2026-10-25 확인). 가수를 못 찾거나 가수 페이지가 실패하면
+    일반 검색 결과(search_music)로 대신함."""
+    try:
+        results = _search(query, None)
+    except Exception as e:
+        raise SearchUnavailable(str(e))
+    found = _items(results)
+    channel = next(
+        (a.get("id") for r in results if r.get("resultType") == "album"
+         for a in (r.get("artists") or []) if a.get("id")),
+        None,
+    )
+    if not channel:
+        return found
+    try:
+        page = _artist(channel)
+    except Exception:
+        return found
+    name = page.get("name") or ""
+    out = []
+    for section, kind in (("albums", "앨범"), ("singles", "싱글")):
+        for r in (page.get(section) or {}).get("results") or []:
+            if not r.get("title"):
+                continue
+            out.append({
+                "album": r["title"],
+                "song": None,
+                "creator": name,
+                "kind": kind,
+                "year": str(r.get("year") or ""),
+                "cover": _cover(r),
+            })
+    return out[:ARTIST_MAX_RESULTS] or found

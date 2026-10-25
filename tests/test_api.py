@@ -1225,3 +1225,48 @@ def test_screen_search_by_director_no_director_found_is_empty(tmdb, monkeypatch)
         return {"results": [{"id": 1, "name": "배우", "known_for_department": "Acting"}]}
     monkeypatch.setattr("app.main.screen_search._tmdb_get", only_actors)
     assert client.get("/api/search/screen", params={"q": "배우", "by": "director"}).json() == []
+
+
+ARTIST_PAGE = {
+    "name": "검정치마",
+    "albums": {"results": [
+        {"title": "TEAM BABY", "year": "2017", "thumbnails": [{"url": "https://yt3.googleusercontent.com/tb=w544"}]},
+        {"title": "THIRSTY", "thumbnails": []},
+    ]},
+    "singles": {"results": [{"title": "Fruit Fly", "thumbnails": [{"url": "https://yt3.googleusercontent.com/ff=w544"}]}]},
+}
+
+
+def test_music_search_by_artist_lists_the_artists_albums_then_singles(monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.main.music_search._search", lambda q, auth: [
+        {"resultType": "artist", "artist": None},  # 맨 위 가수 카드는 이름·id를 못 읽을 때가 있음
+        {"resultType": "album", "title": "TEAM BABY", "artists": [{"name": "검정치마", "id": "UCR90"}]},
+    ])
+
+    def fake_artist(channel):
+        calls.append(channel)
+        return ARTIST_PAGE
+    monkeypatch.setattr("app.main.music_search._artist", fake_artist)
+
+    resp = client.get("/api/search/music", params={"q": "검정치마", "by": "artist"})
+    assert resp.status_code == 200
+    assert calls == ["UCR90"]  # 앨범 결과에 붙은 가수 id로 가수 페이지를 엶
+    assert [(r["album"], r["kind"], r["creator"]) for r in resp.json()] == [
+        ("TEAM BABY", "앨범", "검정치마"), ("THIRSTY", "앨범", "검정치마"), ("Fruit Fly", "싱글", "검정치마"),
+    ]
+    assert resp.json()[0]["year"] == "2017" and resp.json()[1]["cover"] is None
+
+
+def test_music_search_by_artist_falls_back_to_plain_results(monkeypatch):
+    monkeypatch.setattr("app.main.music_search._search", lambda q, auth: YTM_RESULTS)
+
+    def broken(channel):
+        raise KeyError("contents")
+    monkeypatch.setattr("app.main.music_search._artist", broken)
+    resp = client.get("/api/search/music", params={"q": "아이유", "by": "artist"})
+    assert [r["album"] for r in resp.json()] == ["꽃갈피", "꽃갈피"]  # 일반 검색 결과로 대신
+
+
+def test_music_search_unknown_by_is_422(ytm):
+    assert client.get("/api/search/music", params={"q": "x", "by": "album"}).status_code == 422

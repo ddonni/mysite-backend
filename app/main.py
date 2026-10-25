@@ -219,14 +219,21 @@ def search_book(
 
 
 @app.get("/api/search/music", response_model=List[schemas.MusicResult])
-def search_music(request: Request, q: str = Query(..., min_length=1, max_length=100)):
+def search_music(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=100),
+    by: Literal["title", "artist"] = "title",
+):
     """"새 기록" 창 음악 탭의 앨범 검색 — 유튜브 뮤직(비공식 ytmusicapi)에서
     앨범(가끔 노래)을 찾아 가수·커버를 채울 수 있게 돌려줌(music_search.py
     위쪽 설명). 유튜브가 응답 형식을 바꾸거나 막으면 503 — 프론트는 이때
     직접 입력만 하게 됨."""
     _check_rate_limit(request, _music_searches, MUSIC_SEARCH_LIMIT, MUSIC_SEARCH_WINDOW,
                       "too many searches, try again later")
+    # by=artist(가수 칸): 그 가수의 앨범·싱글 목록(일반 검색은 앨범 3개뿐이라).
     try:
+        if by == "artist":
+            return music_search.search_artist(q.strip())
         return music_search.search_music(q.strip())
     except music_search.SearchUnavailable:
         raise HTTPException(status_code=503, detail="music search unavailable")
