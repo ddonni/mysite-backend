@@ -53,7 +53,7 @@ def _get(path: str, params: Optional[dict] = None) -> dict:
         raise SearchUnavailable(str(e))
 
 
-def _to_item(r: dict, media: str) -> dict:
+def _to_item(r: dict, media: str, creator: str = "") -> dict:
     title = (r.get("title") or r.get("name") or "").strip()
     original = (r.get("original_title") or r.get("original_name") or "").strip()
     date = r.get("release_date") or r.get("first_air_date") or ""
@@ -65,7 +65,42 @@ def _to_item(r: dict, media: str) -> dict:
         "original_title": original if original != title else "",
         "year": date[:4],
         "cover": POSTER_BASE + poster if poster else None,
+        "creator": creator,
     }
+
+
+_DIRECTOR_JOBS = ("Director", "Series Director", "Chief Director")
+
+
+def search_by_director(query: str, kind: str) -> List[dict]:
+    """감독 이름으로 찾기(만든 사람 칸) — 사람 검색에서 연출이 주 분야인 첫 사람
+    ("미야자키" → 미야자키 하야오, 인기순)의 연출작. 날짜순이면 단편·특별편이
+    앞에 와서 평가 수(vote_count)가 많은 순으로. kind는 search_screen과 같은 뜻.
+    결과에 creator(그 감독 이름)가 들어 있어서 고를 때 따로 물을 필요 없음."""
+    people = _get("/search/person", {"query": query, "include_adult": "false"}).get("results", [])
+    director = next((p for p in people if p.get("known_for_department") == "Directing"), None)
+    if director is None:
+        return []
+    crew = _get(f"/person/{director['id']}/combined_credits").get("crew", [])
+    seen = set()
+    works = []
+    for w in crew:
+        media = w.get("media_type")
+        if w.get("job") not in _DIRECTOR_JOBS or media not in ("movie", "tv"):
+            continue
+        is_anime = ANIMATION_GENRE in (w.get("genre_ids") or [])
+        if kind == "anime" and not is_anime:
+            continue
+        if kind == "movie" and media != "movie":
+            continue
+        key = (media, w.get("id"))
+        if key in seen:  # TV는 회차마다 같은 작품이 여러 번 나옴
+            continue
+        seen.add(key)
+        works.append(w)
+    works.sort(key=lambda w: w.get("vote_count") or 0, reverse=True)
+    items = [_to_item(w, w["media_type"], director.get("name", "")) for w in works]
+    return [i for i in items if i["title"] and i["id"] is not None][:MAX_RESULTS]
 
 
 def search_screen(query: str, kind: str) -> List[dict]:

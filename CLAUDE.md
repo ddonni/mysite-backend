@@ -191,8 +191,10 @@ tests/test_api.py
   프론트가 새 브라우저의 빈 방이면 묻지 않고 넘어가는 데 씀. 토큰 없이 남의 방이
   비었는지 알아낼 수 없게 하려는 것이라 이 조건을 풀지 말 것.
 - 영화·애니 검색: `TMDB_TOKEN`(비밀, 선택 — TMDB의 "API 읽기 액세스 토큰", 헤더로 보냄)으로
-  `GET /api/search/screen?q=&kind=movie|anime`가 `language=ko-KR`로 찾아
-  `[{id, media: movie|tv, title, original_title, year, cover}]`를 돌려줌(`app/screen_search.py`).
+  `GET /api/search/screen?q=&kind=movie|anime&by=title|director`가 `language=ko-KR`로 찾아
+  `[{id, media: movie|tv, title, original_title, year, cover, creator}]`를 돌려줌(`app/screen_search.py`).
+  `by=director`는 사람 검색에서 연출이 주 분야인 첫 사람의 combined_credits 중 연출작만
+  (TV 회차 중복 제거, vote_count 많은 순 — 날짜순이면 단편이 앞에 옴), `creator`에 그 감독 이름.
   anime는 `/search/multi`에서 애니메이션 장르(16)인 영화·TV만. 검색 결과엔 감독이 없어서
   고른 작품만 `GET /api/search/screen/creator?media=&id=`로 따로 물음(영화는 credits의
   Director, TV는 aggregate_credits에서 Series/Chief Director를 먼저, 없으면 첫 Director).

@@ -111,7 +111,8 @@ class ScreenResult(BaseModel):
     """GET /api/search/screen — one TMDB movie/TV hit. No director here (it
     costs a request per title); the form asks GET /api/search/screen/creator
     for the one the user picks. original_title is "" when it's the same as
-    title."""
+    title. creator is filled only for by=director searches (it's the
+    director that was searched for), "" otherwise."""
 
     id: int
     media: Literal["movie", "tv"]
@@ -119,6 +120,7 @@ class ScreenResult(BaseModel):
     original_title: str
     year: str
     cover: Optional[str] = None
+    creator: str = ""
 
 
 class ScreenCreatorOut(BaseModel):

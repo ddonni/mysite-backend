@@ -1119,6 +1119,18 @@ def tmdb(monkeypatch):
         "/tv/1429/aggregate_credits": {"crew": [
             {"name": "회차 연출", "jobs": [{"job": "Director"}]},
             {"name": "아라키 테츠로", "jobs": [{"job": "Series Director"}]}]},
+        "/search/person": {"results": [
+            {"id": 104522, "name": "미야자키 아오이", "known_for_department": "Acting"},
+            {"id": 608, "name": "미야자키 하야오", "known_for_department": "Directing"}]},
+        "/person/608/combined_credits": {"crew": [
+            {"media_type": "movie", "id": 1, "title": "단편", "job": "Director", "genre_ids": [16], "vote_count": 3},
+            {"media_type": "movie", "id": 129, "title": "센과 치히로의 행방불명", "job": "Director",
+             "genre_ids": [16, 14], "vote_count": 17000, "release_date": "2001-07-20", "poster_path": "/s.jpg"},
+            {"media_type": "movie", "id": 129, "title": "센과 치히로의 행방불명", "job": "Screenplay", "genre_ids": [16]},
+            {"media_type": "movie", "id": 7, "title": "실사 다큐", "job": "Director", "genre_ids": [99], "vote_count": 50},
+            {"media_type": "tv", "id": 8, "name": "미래소년 코난", "job": "Director", "genre_ids": [16], "vote_count": 400},
+            {"media_type": "tv", "id": 8, "name": "미래소년 코난", "job": "Director", "genre_ids": [16], "vote_count": 400},
+        ]},
         "/tv/2/aggregate_credits": {"crew": [
             {"name": "각본가", "jobs": [{"job": "Writer"}]},
             {"name": "와타나베 신이치로", "jobs": [{"job": "Director"}]}]},
@@ -1137,10 +1149,10 @@ def test_screen_search_movie(tmdb):
     assert tmdb[0][:1] == ("/search/movie",) and tmdb[0][1]["query"] == "인터스텔라" and tmdb[0][2] == "test-token"
     assert resp.json() == [
         {"id": 157336, "media": "movie", "title": "인터스텔라", "original_title": "Interstellar", "year": "2014",
-         "cover": "https://image.tmdb.org/t/p/w342/gD.jpg"},
+         "cover": "https://image.tmdb.org/t/p/w342/gD.jpg", "creator": ""},
         # 원제가 한국어 제목과 같으면 비워 둠(목록에 같은 말을 두 번 안 씀)
         {"id": 496243, "media": "movie", "title": "기생충", "original_title": "", "year": "2019",
-         "cover": "https://image.tmdb.org/t/p/w342/jj.jpg"},
+         "cover": "https://image.tmdb.org/t/p/w342/jj.jpg", "creator": ""},
     ]
 
 
@@ -1188,3 +1200,28 @@ def test_screen_search_rate_limit(tmdb):
     assert client.get("/api/search/screen", params={"q": "기생충"}).status_code == 429
     assert client.get("/api/search/screen/creator", params={"media": "movie", "id": 1}).status_code == 429
     assert tmdb == []
+
+
+def test_screen_search_by_director_lists_their_works_most_known_first(tmdb):
+    resp = client.get("/api/search/screen", params={"q": "미야자키", "kind": "anime", "by": "director"})
+    assert resp.status_code == 200
+    assert [c[0] for c in tmdb] == ["/search/person", "/person/608/combined_credits"]  # 배우 말고 감독
+    got = [(r["media"], r["title"], r["creator"]) for r in resp.json()]
+    # 애니만, 연출만(각본 줄 빠짐), TV 회차 중복 빠짐, 평가 수 많은 순
+    assert got == [
+        ("movie", "센과 치히로의 행방불명", "미야자키 하야오"),
+        ("tv", "미래소년 코난", "미야자키 하야오"),
+        ("movie", "단편", "미야자키 하야오"),
+    ]
+
+
+def test_screen_search_by_director_movie_tab_keeps_movies_only(tmdb):
+    resp = client.get("/api/search/screen", params={"q": "미야자키", "kind": "movie", "by": "director"})
+    assert [r["title"] for r in resp.json()] == ["센과 치히로의 행방불명", "실사 다큐", "단편"]
+
+
+def test_screen_search_by_director_no_director_found_is_empty(tmdb, monkeypatch):
+    def only_actors(path, params, token):
+        return {"results": [{"id": 1, "name": "배우", "known_for_department": "Acting"}]}
+    monkeypatch.setattr("app.main.screen_search._tmdb_get", only_actors)
+    assert client.get("/api/search/screen", params={"q": "배우", "by": "director"}).json() == []

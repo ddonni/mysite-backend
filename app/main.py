@@ -237,14 +237,17 @@ def search_screen(
     request: Request,
     q: str = Query(..., min_length=1, max_length=100),
     kind: Literal["movie", "anime"] = "movie",
+    by: Literal["title", "director"] = "title",
 ):
-    """"새 기록" 창 영화·애니 탭의 제목 검색 — TMDB에서 한국어 제목·포스터를
-    찾아 줌(screen_search.py 위쪽 설명). 감독은 고른 작품만 따로
-    (/api/search/screen/creator). 토큰(TMDB_TOKEN)이 없거나 TMDB가 응답을
-    못 하면 503."""
+    """"새 기록" 창 영화·애니 탭의 검색 — TMDB에서 한국어 제목·포스터를 찾아 줌
+    (screen_search.py 위쪽 설명). by=title이면 제목으로(감독은 고른 작품만 따로
+    /api/search/screen/creator), by=director면 그 감독의 연출작(감독 이름이
+    creator에 들어 있음). 토큰(TMDB_TOKEN)이 없거나 TMDB가 응답을 못 하면 503."""
     _check_rate_limit(request, _screen_searches, SCREEN_SEARCH_LIMIT, SCREEN_SEARCH_WINDOW,
                       "too many searches, try again later")
     try:
+        if by == "director":
+            return screen_search.search_by_director(q.strip(), kind)
         return screen_search.search_screen(q.strip(), kind)
     except screen_search.SearchUnavailable:
         raise HTTPException(status_code=503, detail="screen search unavailable")
