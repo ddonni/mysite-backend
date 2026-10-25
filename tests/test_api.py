@@ -14,8 +14,8 @@ from app.database import Base, engine
 from app import models
 from app.database import SessionLocal
 from app.main import (
-    BOOK_SEARCH_LIMIT, FEEDBACK_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW,
-    _book_searches, _feedback_posts, _room_creations, app,
+    BOOK_SEARCH_LIMIT, FEEDBACK_LIMIT, MUSIC_SEARCH_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW,
+    _book_searches, _feedback_posts, _music_searches, _room_creations, app,
 )
 
 client = TestClient(app)
@@ -35,6 +35,7 @@ def fresh_database():
     _room_creations.clear()
     _feedback_posts.clear()
     _book_searches.clear()
+    _music_searches.clear()
     yield
     Base.metadata.drop_all(bind=engine)
 
@@ -999,3 +1000,76 @@ def test_cover_relay_upstream_failure_is_502(monkeypatch):
     monkeypatch.setattr("app.main.book_search._fetch_image", fail)
     resp = client.get("/api/cover", params={"url": "https://t1.daumcdn.net/lbook/image/1"})
     assert resp.status_code == 502
+
+
+# --- music search (GET /api/search/music) ---
+
+YTM_RESULTS = [
+    {"resultType": "episode", "title": "[클립] 꽃갈피", "artists": []},
+    {"resultType": "album", "title": "꽃갈피", "type": "EP", "year": "2014",
+     "artists": [{"name": "아이유(IU)"}],
+     "thumbnails": [{"url": "https://yt3.googleusercontent.com/a=w60", "width": 60},
+                    {"url": "https://yt3.googleusercontent.com/a=w544", "width": 544}]},
+    {"resultType": "song", "title": "나의 옛날이야기", "album": {"name": "꽃갈피"},
+     "artists": [{"name": "아이유(IU)"}], "thumbnails": []},
+    {"resultType": "artist", "artist": "아이유"},
+]
+
+
+@pytest.fixture
+def ytm(monkeypatch):
+    """유튜브 대신 받은 (query, auth_file)을 기록하고 YTM_RESULTS를 돌려줌."""
+    monkeypatch.delenv("YTMUSIC_AUTH_FILE", raising=False)
+    calls = []
+
+    def fake_search(query, auth_file):
+        calls.append((query, auth_file))
+        return YTM_RESULTS
+    monkeypatch.setattr("app.main.music_search._search", fake_search)
+    return calls
+
+
+def test_music_search_keeps_albums_and_songs_only(ytm):
+    resp = client.get("/api/search/music", params={"q": " 아이유 꽃갈피 "})
+    assert resp.status_code == 200
+    assert ytm == [("아이유 꽃갈피", None)]
+    assert resp.json() == [
+        {"album": "꽃갈피", "song": None, "creator": "아이유(IU)", "kind": "EP", "year": "2014",
+         "cover": "https://yt3.googleusercontent.com/a=w544"},  # 가장 큰 썸네일
+        {"album": "꽃갈피", "song": "나의 옛날이야기", "creator": "아이유(IU)", "kind": "노래", "year": "",
+         "cover": None},
+    ]
+
+
+def test_music_search_falls_back_to_anonymous_when_signed_in_search_fails(monkeypatch):
+    monkeypatch.setenv("YTMUSIC_AUTH_FILE", "/etc/mysite/ytmusic.json")
+    calls = []
+
+    def fake_search(query, auth_file):
+        calls.append(auth_file)
+        if auth_file:
+            raise Exception("cookies expired")
+        return YTM_RESULTS
+    monkeypatch.setattr("app.main.music_search._search", fake_search)
+
+    resp = client.get("/api/search/music", params={"q": "꽃갈피"})
+    assert resp.status_code == 200
+    assert calls == ["/etc/mysite/ytmusic.json", None]
+    assert len(resp.json()) == 2
+
+
+def test_music_search_youtube_failure_is_503(monkeypatch):
+    def boom(query, auth_file):
+        raise KeyError("contents")  # 유튜브 응답 형식이 바뀌어 ytmusicapi가 깨진 경우
+    monkeypatch.setattr("app.main.music_search._search", boom)
+    resp = client.get("/api/search/music", params={"q": "꽃갈피"})
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "music search unavailable"
+
+
+def test_music_search_rate_limit(ytm):
+    _music_searches["testclient"] = [datetime.now(timezone.utc)] * MUSIC_SEARCH_LIMIT
+    assert client.get("/api/search/music", params={"q": "꽃갈피"}).status_code == 429
+    assert ytm == []
+    # 책 검색 한도와는 따로 셈
+    assert "testclient" not in _book_searches

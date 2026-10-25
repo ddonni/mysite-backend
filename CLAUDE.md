@@ -119,6 +119,7 @@ app/
   crud.py       # DB 접근 로직, 방 코드/토큰 생성
   storage.py    # S3 사진 업로드
   book_search.py # 카카오 책 검색 + 표지 중계(허용 서버만)
+  music_search.py # 유튜브 뮤직 앨범 검색(ytmusicapi, 비공식)
   google_auth.py # 구글 ID 토큰 검증
   migrations.py # 시작 시 Postgres에 alembic upgrade head를 실행 (SQLite는 스킵)
 alembic.ini
@@ -152,7 +153,9 @@ tests/test_api.py
   책 검색(`GET /api/search/book`)은 키가 없거나 카카오가 응답을 못 하면 503
   `"book search unavailable"`, IP당 한 시간 600번을 넘으면 429 `"too many searches,
   try again later"`. 표지 중계(`GET /api/cover`)는 허용 서버가 아니면 400
-  `"cover host not allowed"`, 원본을 못 받으면 502 `"cover fetch failed"`(프론트는
+  `"cover host not allowed"`, 원본을 못 받으면 502 `"cover fetch failed"`. 음악 검색
+  (`GET /api/search/music`)은 유튜브 쪽이 실패하면 503 `"music search unavailable"`,
+  한도(책과 따로 IP당 한 시간 600번)를 넘으면 429 `"too many searches, try again later"`(프론트는
   검색 실패를 "결과 없음"으로, 표지 실패를 제목 카드로 대신함 — 문자열로 구분하진 않음).
   이 문자열을 바꾸면 `mysite`의 프론트 코드도 같이 고쳐야 함.
 - `PUT /api/rooms/{code}/pages/{n}`은 부분 수정이 아니라 해당 페이지의
@@ -184,6 +187,15 @@ tests/test_api.py
   복구하는 방과 다를 때만 채움(기록도 그림도 없으면 true, `crud.is_room_empty`) —
   프론트가 새 브라우저의 빈 방이면 묻지 않고 넘어가는 데 씀. 토큰 없이 남의 방이
   비었는지 알아낼 수 없게 하려는 것이라 이 조건을 풀지 말 것.
+- 음악 검색: `GET /api/search/music?q=`는 **비공식** ytmusicapi로 유튜브 뮤직을 검색해
+  `[{album, song, creator, kind, year, cover}]`를 돌려줌(`app/music_search.py`). 키는 없지만
+  유튜브가 응답 형식을 바꾸면 언제든 깨질 수 있어서 실패는 전부 503(프론트는 결과 없음으로).
+  2026-10-25 확인: 로그인 없이는 노래 검색 결과를 유튜브가 아예 안 줌("검색결과가 없습니다")
+  — `filter='songs'`가 0건인 것도 같은 이유라 라이브러리 버그가 아님. 그래서 앨범(싱글 포함)만
+  쓰고, 거르지 않은 `search()`에서 album/song만 골라냄. EC2(AWS IP)에서도 동작 확인.
+  `YTMUSIC_AUTH_FILE`(선택)에 버리는 구글 계정의 ytmusicapi 브라우저 인증 JSON 경로를 주면
+  로그인 검색을 먼저 해 보고, 실패하면(쿠키 만료·계정 차단) 비로그인으로 돌아감 — 본 계정은
+  절대 쓰지 말 것. ytmusicapi는 요청에 timeout을 안 줘서 `_TimeoutSession`으로 5초를 붙임.
 - 책 검색: `KAKAO_REST_KEY`(비밀, 선택) 환경 변수로 `GET /api/search/book?q=`가 카카오
   책 검색을 대신 불러 `[{title, full_title, creator, publisher, year, cover}]`로 다듬어
   돌려줌(`app/book_search.py` — title은 판본 괄호·": 부제"를 뗀 것, cover는 120x174

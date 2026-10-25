@@ -94,6 +94,19 @@ class BookResult(BaseModel):
     cover: Optional[str] = None
 
 
+class MusicResult(BaseModel):
+    """GET /api/search/music — one YouTube Music album (or, when signed-in
+    search works, song) hit. The form fills in only creator and cover; the
+    title the user typed stays. song is None for album results."""
+
+    album: str
+    song: Optional[str] = None
+    creator: str
+    kind: str
+    year: str
+    cover: Optional[str] = None
+
+
 class GoogleStatusOut(BaseModel):
     """GET /api/rooms/{code}/google — lets the frontend swap the sign-in
     button for "linked as <email>" once a room already has one linked."""
