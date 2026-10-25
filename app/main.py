@@ -195,14 +195,19 @@ def send_feedback(body: schemas.FeedbackIn, request: Request, db: Session = Depe
 
 
 @app.get("/api/search/book", response_model=List[schemas.BookResult])
-def search_book(request: Request, q: str = Query(..., min_length=1, max_length=100)):
-    """"새 기록" 창의 제목 검색 — 카카오 책 검색을 대신 불러 표지·작가까지
-    채울 수 있게 다듬어 돌려줌. 키(KAKAO_REST_KEY)가 없거나 카카오가 응답을
-    못 하면 503 — 프론트는 이때 지금처럼 직접 입력만 하게 됨."""
+def search_book(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=100),
+    by: Literal["title", "author"] = "title",
+):
+    """"새 기록" 창의 제목·작가 검색 — 카카오 책 검색을 대신 불러 표지·작가까지
+    채울 수 있게 다듬어 돌려줌. by=author면 작가 이름으로만 찾음(작가 칸).
+    키(KAKAO_REST_KEY)가 없거나 카카오가 응답을 못 하면 503 — 프론트는 이때
+    지금처럼 직접 입력만 하게 됨."""
     _check_rate_limit(request, _book_searches, BOOK_SEARCH_LIMIT, BOOK_SEARCH_WINDOW,
                       "too many searches, try again later")
     try:
-        return book_search.search_books(q.strip())
+        return book_search.search_books(q.strip(), by_author=(by == "author"))
     except book_search.SearchUnavailable:
         raise HTTPException(status_code=503, detail="book search unavailable")
 

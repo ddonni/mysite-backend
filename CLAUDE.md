@@ -196,7 +196,8 @@ tests/test_api.py
   `YTMUSIC_AUTH_FILE`(선택)에 버리는 구글 계정의 ytmusicapi 브라우저 인증 JSON 경로를 주면
   로그인 검색을 먼저 해 보고, 실패하면(쿠키 만료·계정 차단) 비로그인으로 돌아감 — 본 계정은
   절대 쓰지 말 것. ytmusicapi는 요청에 timeout을 안 줘서 `_TimeoutSession`으로 5초를 붙임.
-- 책 검색: `KAKAO_REST_KEY`(비밀, 선택) 환경 변수로 `GET /api/search/book?q=`가 카카오
+- 책 검색: `KAKAO_REST_KEY`(비밀, 선택) 환경 변수로 `GET /api/search/book?q=&by=title|author`가
+  (`by=author`면 카카오 `target=person` — 작가 칸에서 이름으로만 찾을 때) 카카오
   책 검색을 대신 불러 `[{title, full_title, creator, publisher, year, cover}]`로 다듬어
   돌려줌(`app/book_search.py` — title은 판본 괄호·": 부제"를 뗀 것, cover는 120x174
   썸네일 대신 그 안 fname=의 원본). 알라딘 OpenAPI는 2026-10-30 종료라 안 씀.

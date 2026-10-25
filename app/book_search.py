@@ -41,10 +41,13 @@ class CoverFetchFailed(Exception):
 
 # --- search ---
 
-def _kakao_get(query: str, key: str) -> dict:
+def _kakao_get(query: str, key: str, target: Optional[str] = None) -> dict:
+    params = {"query": query, "size": SEARCH_SIZE}
+    if target:
+        params["target"] = target  # "person" = 작가·역자 이름에서만 찾음
     resp = requests.get(
         KAKAO_BOOK_URL,
-        params={"query": query, "size": SEARCH_SIZE},
+        params=params,
         headers={"Authorization": f"KakaoAK {key}"},
         timeout=TIMEOUT,
     )
@@ -89,12 +92,14 @@ def cover_from_thumbnail(thumbnail: str) -> Optional[str]:
     return thumbnail
 
 
-def search_books(query: str) -> List[dict]:
+def search_books(query: str, by_author: bool = False) -> List[dict]:
+    """by_author: 작가 칸에서 검색할 때 — 제목·내용이 아니라 작가 이름으로만 찾음
+    ("한강"이 제목에 든 책 대신 한강 작가의 책)."""
     key = os.environ.get("KAKAO_REST_KEY", "").strip()
     if not key:
         raise SearchUnavailable("KAKAO_REST_KEY is not set")
     try:
-        data = _kakao_get(query, key)
+        data = _kakao_get(query, key, "person" if by_author else None)
     except (requests.RequestException, ValueError) as e:
         raise SearchUnavailable(str(e))
 

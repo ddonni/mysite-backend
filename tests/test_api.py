@@ -899,8 +899,8 @@ def kakao(monkeypatch):
     monkeypatch.setenv("KAKAO_REST_KEY", "test-key")
     calls = []
 
-    def fake_get(query, key):
-        calls.append((query, key))
+    def fake_get(query, key, target=None):
+        calls.append((query, key, target))
         return KAKAO_DEMIAN
     monkeypatch.setattr("app.main.book_search._kakao_get", fake_get)
     return calls
@@ -910,7 +910,7 @@ def test_book_search_trims_kakao_results_for_the_form(kakao):
     resp = client.get("/api/search/book", params={"q": " 데미안 "})
     assert resp.status_code == 200
     first, second = resp.json()
-    assert kakao == [("데미안", "test-key")]
+    assert kakao == [("데미안", "test-key", None)]
     assert first == {
         "title": "데미안",
         "full_title": "데미안(양장본)(1919년 초판본 표지 디자인)",
@@ -923,6 +923,16 @@ def test_book_search_trims_kakao_results_for_the_form(kakao):
     assert second["title"] == "데미안"
     assert second["creator"] == "헤르만 헤세, A 외"
     assert second["cover"] is None and second["year"] == ""
+
+
+def test_book_search_by_author_asks_kakao_for_person(kakao):
+    assert client.get("/api/search/book", params={"q": "한강", "by": "author"}).status_code == 200
+    assert kakao == [("한강", "test-key", "person")]
+
+
+def test_book_search_unknown_by_is_422(kakao):
+    assert client.get("/api/search/book", params={"q": "한강", "by": "publisher"}).status_code == 422
+    assert kakao == []
 
 
 def test_clean_title_keeps_volume_numbers_and_bare_colons():
@@ -943,7 +953,7 @@ def test_book_search_kakao_failure_is_503(monkeypatch):
     import requests
     monkeypatch.setenv("KAKAO_REST_KEY", "test-key")
 
-    def boom(query, key):
+    def boom(query, key, target=None):
         raise requests.ConnectionError("down")
     monkeypatch.setattr("app.main.book_search._kakao_get", boom)
     assert client.get("/api/search/book", params={"q": "데미안"}).status_code == 503
