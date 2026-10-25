@@ -13,7 +13,10 @@ from fastapi.testclient import TestClient
 from app.database import Base, engine
 from app import models
 from app.database import SessionLocal
-from app.main import FEEDBACK_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW, _feedback_posts, _room_creations, app
+from app.main import (
+    BOOK_SEARCH_LIMIT, FEEDBACK_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW,
+    _book_searches, _feedback_posts, _room_creations, app,
+)
 
 client = TestClient(app)
 
@@ -31,6 +34,7 @@ def fresh_database():
     # reasoning as resetting the database.
     _room_creations.clear()
     _feedback_posts.clear()
+    _book_searches.clear()
     yield
     Base.metadata.drop_all(bind=engine)
 
@@ -862,3 +866,136 @@ def test_feedback_is_rate_limited_per_ip():
     assert resp.json()["detail"] == "too many feedback, try again later"
     # 방 만들기 제한과는 따로 셈
     assert client.post("/api/rooms").status_code == 200
+
+
+# --- book search (GET /api/search/book) + cover relay (GET /api/cover) ---
+
+KAKAO_DEMIAN = {
+    "documents": [
+        {
+            "title": "데미안(양장본)(1919년 초판본 표지 디자인)",
+            "authors": ["헤르만 헤세"],
+            "translators": ["전영애"],
+            "publisher": "민음사",
+            "datetime": "2009-01-20T00:00:00.000+09:00",
+            "thumbnail": "https://search1.kakaocdn.net/thumb/R120x174.q85/?fname=http%3A%2F%2Ft1.daumcdn.net%2Flbook%2Fimage%2F540810%3Ftimestamp%3D20261023110741",
+        },
+        {
+            "title": "데미안: 에밀 싱클레어의 청소년 시절 이야기",
+            "authors": ["헤르만 헤세", "A", "B"],
+            "publisher": "코너스톤",
+            "datetime": "",
+            "thumbnail": "",
+        },
+    ],
+    "meta": {"total_count": 2},
+}
+
+
+@pytest.fixture
+def kakao(monkeypatch):
+    """Kakao 키가 있는 것처럼 하고, 실제 호출 대신 받은 query를 기록함."""
+    monkeypatch.setenv("KAKAO_REST_KEY", "test-key")
+    calls = []
+
+    def fake_get(query, key):
+        calls.append((query, key))
+        return KAKAO_DEMIAN
+    monkeypatch.setattr("app.main.book_search._kakao_get", fake_get)
+    return calls
+
+
+def test_book_search_trims_kakao_results_for_the_form(kakao):
+    resp = client.get("/api/search/book", params={"q": " 데미안 "})
+    assert resp.status_code == 200
+    first, second = resp.json()
+    assert kakao == [("데미안", "test-key")]
+    assert first == {
+        "title": "데미안",
+        "full_title": "데미안(양장본)(1919년 초판본 표지 디자인)",
+        "creator": "헤르만 헤세",
+        "publisher": "민음사",
+        "year": "2009",
+        # 120x174 썸네일 대신 fname= 안의 원본, https로
+        "cover": "https://t1.daumcdn.net/lbook/image/540810?timestamp=20261023110741",
+    }
+    assert second["title"] == "데미안"
+    assert second["creator"] == "헤르만 헤세, A 외"
+    assert second["cover"] is None and second["year"] == ""
+
+
+def test_clean_title_keeps_volume_numbers_and_bare_colons():
+    from app.book_search import clean_title
+    assert clean_title("해리 포터와 마법사의 돌(1)") == "해리 포터와 마법사의 돌(1)"
+    assert clean_title("나미야 잡화점의 기적(양장본)") == "나미야 잡화점의 기적"
+    assert clean_title("Re:제로부터 시작하는 이세계 생활 1") == "Re:제로부터 시작하는 이세계 생활 1"
+
+
+def test_book_search_without_key_is_503(monkeypatch):
+    monkeypatch.delenv("KAKAO_REST_KEY", raising=False)
+    resp = client.get("/api/search/book", params={"q": "데미안"})
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "book search unavailable"
+
+
+def test_book_search_kakao_failure_is_503(monkeypatch):
+    import requests
+    monkeypatch.setenv("KAKAO_REST_KEY", "test-key")
+
+    def boom(query, key):
+        raise requests.ConnectionError("down")
+    monkeypatch.setattr("app.main.book_search._kakao_get", boom)
+    assert client.get("/api/search/book", params={"q": "데미안"}).status_code == 503
+
+
+def test_book_search_empty_query_is_422(kakao):
+    assert client.get("/api/search/book", params={"q": ""}).status_code == 422
+
+
+def test_book_search_rate_limit(kakao):
+    _book_searches["testclient"] = [datetime.now(timezone.utc)] * BOOK_SEARCH_LIMIT
+    resp = client.get("/api/search/book", params={"q": "데미안"})
+    assert resp.status_code == 429
+    assert kakao == []
+
+
+def test_cover_relay_returns_image_with_long_cache(monkeypatch):
+    fetched = []
+
+    def fake_fetch(url):
+        fetched.append(url)
+        return b"\xff\xd8jpeg", "image/jpeg"
+    monkeypatch.setattr("app.main.book_search._fetch_image", fake_fetch)
+
+    resp = client.get("/api/cover", params={"url": "http://t1.daumcdn.net/lbook/image/540810?timestamp=1"})
+    assert resp.status_code == 200
+    assert resp.content == b"\xff\xd8jpeg"
+    assert resp.headers["content-type"] == "image/jpeg"
+    assert "max-age=" in resp.headers["cache-control"]
+    assert fetched == ["https://t1.daumcdn.net/lbook/image/540810?timestamp=1"]  # 항상 https로 받음
+
+
+@pytest.mark.parametrize("url", [
+    "https://example.com/a.jpg",
+    "https://t1.daumcdn.net.evil.com/a.jpg",
+    "file:///etc/passwd",
+    "http://127.0.0.1:8000/health",
+    "not a url",
+])
+def test_cover_relay_refuses_other_hosts(monkeypatch, url):
+    def never(u):
+        raise AssertionError("must not fetch " + u)
+    monkeypatch.setattr("app.main.book_search._fetch_image", never)
+    resp = client.get("/api/cover", params={"url": url})
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "cover host not allowed"
+
+
+def test_cover_relay_upstream_failure_is_502(monkeypatch):
+    from app.book_search import CoverFetchFailed
+
+    def fail(u):
+        raise CoverFetchFailed("status 404")
+    monkeypatch.setattr("app.main.book_search._fetch_image", fail)
+    resp = client.get("/api/cover", params={"url": "https://t1.daumcdn.net/lbook/image/1"})
+    assert resp.status_code == 502

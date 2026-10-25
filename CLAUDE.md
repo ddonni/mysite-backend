@@ -118,6 +118,8 @@ app/
   schemas.py    # Pydantic 스키마
   crud.py       # DB 접근 로직, 방 코드/토큰 생성
   storage.py    # S3 사진 업로드
+  book_search.py # 카카오 책 검색 + 표지 중계(허용 서버만)
+  google_auth.py # 구글 ID 토큰 검증
   migrations.py # 시작 시 Postgres에 alembic upgrade head를 실행 (SQLite는 스킵)
 alembic.ini
 alembic/
@@ -147,6 +149,11 @@ tests/test_api.py
   `"file too large"`(프론트는 지금 이 둘을 일반 저장 실패로만 안내함).
   피드백(`POST /api/feedback`)이 IP당 한 시간 60개를 넘으면 429
   `"too many feedback, try again later"`(프론트는 상태 코드 429로만 구분함).
+  책 검색(`GET /api/search/book`)은 키가 없거나 카카오가 응답을 못 하면 503
+  `"book search unavailable"`, IP당 한 시간 600번을 넘으면 429 `"too many searches,
+  try again later"`. 표지 중계(`GET /api/cover`)는 허용 서버가 아니면 400
+  `"cover host not allowed"`, 원본을 못 받으면 502 `"cover fetch failed"`(프론트는
+  검색 실패를 "결과 없음"으로, 표지 실패를 제목 카드로 대신함 — 문자열로 구분하진 않음).
   이 문자열을 바꾸면 `mysite`의 프론트 코드도 같이 고쳐야 함.
 - `PUT /api/rooms/{code}/pages/{n}`은 부분 수정이 아니라 해당 페이지의
   `strokes` 전체를 교체하는 API. 저장 성공 시 같은 (room, page)를 보고
@@ -177,6 +184,15 @@ tests/test_api.py
   복구하는 방과 다를 때만 채움(기록도 그림도 없으면 true, `crud.is_room_empty`) —
   프론트가 새 브라우저의 빈 방이면 묻지 않고 넘어가는 데 씀. 토큰 없이 남의 방이
   비었는지 알아낼 수 없게 하려는 것이라 이 조건을 풀지 말 것.
+- 책 검색: `KAKAO_REST_KEY`(비밀, 선택) 환경 변수로 `GET /api/search/book?q=`가 카카오
+  책 검색을 대신 불러 `[{title, full_title, creator, publisher, year, cover}]`로 다듬어
+  돌려줌(`app/book_search.py` — title은 판본 괄호·": 부제"를 뗀 것, cover는 120x174
+  썸네일 대신 그 안 fname=의 원본). 알라딘 OpenAPI는 2026-10-30 종료라 안 씀.
+  카카오 표지 서버는 CORS 헤더를 안 줘서, 프론트(모든 사진을 crossOrigin으로 받음)가
+  `GET /api/cover?url=`로 받아 감 — **허용 서버(`book_search.COVER_HOSTS`)만** 받고
+  리다이렉트도 안 따라감(열린 프록시가 되지 않게). 이 목록은 프론트
+  `js/shared/photoSrc.js`의 `RELAY_HOSTS`와 같아야 함. 표지는 DB에 카카오 원래 주소
+  그대로 저장(S3에 복사하지 않음).
 - **스키마 변경은 전부 Alembic 리비전으로 한다** (`alembic/versions/`).
   `main.py`의 lifespan이 Postgres일 때 `migrations.py`를 통해 시작 시마다
   `alembic upgrade head`를 실행함 — 예전처럼 `app/migrations.py`에

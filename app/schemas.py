@@ -80,6 +80,20 @@ class GoogleAuthOut(BaseModel):
     current_empty: Optional[bool] = None
 
 
+class BookResult(BaseModel):
+    """GET /api/search/book — one Kakao book search hit, trimmed to what the
+    "새 기록" form fills in. title is cleaned for the form (edition notes and
+    subtitle dropped); full_title is shown in the dropdown so similar
+    editions can be told apart."""
+
+    title: str
+    full_title: str
+    creator: str
+    publisher: str
+    year: str
+    cover: Optional[str] = None
+
+
 class GoogleStatusOut(BaseModel):
     """GET /api/rooms/{code}/google — lets the frontend swap the sign-in
     button for "linked as <email>" once a room already has one linked."""
@@ -127,7 +141,9 @@ class DeleteOut(BaseModel):
 class RecordIn(BaseModel):
     """One 'watched/read it' log entry. photo_url comes from POST
     /api/uploads — the client uploads the photo first, then sends the
-    returned URL along with the rest of the fields."""
+    returned URL along with the rest of the fields — or is a Kakao cover
+    URL picked from GET /api/search/book (stored as-is, shown through
+    GET /api/cover)."""
 
     cat: Literal["book", "anime", "movie", "music"]
     title: str

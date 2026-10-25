@@ -4,11 +4,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Literal, Optional, Tuple
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from . import crud, google_auth, models, schemas, storage
+from . import book_search, crud, google_auth, models, schemas, storage
 from .database import Base, SessionLocal, engine, get_db
 from .migrations import run_startup_migrations
 
@@ -128,6 +128,17 @@ _feedback_posts: Dict[str, List[datetime]] = {}
 FEEDBACK_LIMIT = 60
 FEEDBACK_WINDOW = timedelta(hours=1)
 
+# 책 검색은 우리 서버가 카카오 키로 대신 묻는 것이라, 막지 않으면 남이 이
+# 엔드포인트로 키의 하루 한도를 다 써버릴 수 있음. 제목 하나 칠 때 5~10번쯤
+# 나가므로(입력 멈출 때마다) 한 학원 30명이 몇 권씩 기록해도 남게 600으로 둠.
+_book_searches: Dict[str, List[datetime]] = {}
+BOOK_SEARCH_LIMIT = 600
+BOOK_SEARCH_WINDOW = timedelta(hours=1)
+
+# 표지는 한 번 받으면 바뀌지 않으니(주소에 timestamp가 들어 있음) 브라우저가
+# 오래 캐시하게 함 — 같은 표지로 로비를 다시 열 때 우리 서버까지 안 옴.
+COVER_CACHE_SECONDS = 30 * 24 * 3600
+
 
 def _token_matches(given: Optional[str], real: str) -> bool:
     # 문자열을 ==로 비교하면 앞에서부터 틀린 글자를 만나는 순간 끝나서, 응답
@@ -172,6 +183,36 @@ def send_feedback(body: schemas.FeedbackIn, request: Request, db: Session = Depe
                       "too many feedback, try again later")
     crud.create_feedback(db, body.model_dump())
     return {"ok": True}
+
+
+@app.get("/api/search/book", response_model=List[schemas.BookResult])
+def search_book(request: Request, q: str = Query(..., min_length=1, max_length=100)):
+    """"새 기록" 창의 제목 검색 — 카카오 책 검색을 대신 불러 표지·작가까지
+    채울 수 있게 다듬어 돌려줌. 키(KAKAO_REST_KEY)가 없거나 카카오가 응답을
+    못 하면 503 — 프론트는 이때 지금처럼 직접 입력만 하게 됨."""
+    _check_rate_limit(request, _book_searches, BOOK_SEARCH_LIMIT, BOOK_SEARCH_WINDOW,
+                      "too many searches, try again later")
+    try:
+        return book_search.search_books(q.strip())
+    except book_search.SearchUnavailable:
+        raise HTTPException(status_code=503, detail="book search unavailable")
+
+
+@app.get("/api/cover")
+def relay_cover(url: str = Query(..., max_length=1000)):
+    """카카오 표지를 우리 CORS 헤더로 다시 내보냄(book_search.py 위쪽 설명).
+    카카오 표지 서버만 허용 — 그 밖의 주소는 400."""
+    try:
+        body, content_type = book_search.fetch_cover(url)
+    except book_search.CoverNotAllowed:
+        raise HTTPException(status_code=400, detail="cover host not allowed")
+    except book_search.CoverFetchFailed:
+        raise HTTPException(status_code=502, detail="cover fetch failed")
+    return Response(
+        content=body,
+        media_type=content_type,
+        headers={"Cache-Control": f"public, max-age={COVER_CACHE_SECONDS}, immutable"},
+    )
 
 
 @app.get("/api/rooms", response_model=List[schemas.PublicRoomOut])
