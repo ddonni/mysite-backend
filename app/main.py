@@ -4,13 +4,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Literal, Optional, Tuple
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from . import book_search, crud, google_auth, models, music_search, schemas, screen_search, storage
+from . import crud, google_auth, models, schemas, search_routes, storage
 from .database import Base, SessionLocal, engine, get_db
 from .migrations import run_startup_migrations
+from .ratelimit import check_rate_limit
 
 
 @asynccontextmanager
@@ -41,6 +42,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 새 기록 창의 외부 검색(책·음악·영화·애니)과 표지 중계 — search_routes.py.
+app.include_router(search_routes.router)
 
 
 class ConnectionManager:
@@ -91,35 +95,8 @@ ROOM_CREATE_LIMIT = 50
 ROOM_CREATE_WINDOW = timedelta(hours=1)
 
 
-def _client_ip(request: Request) -> str:
-    # Nginx terminates TLS and proxies to uvicorn on 127.0.0.1, so
-    # request.client.host is the proxy, not the visitor. Nginx *overwrites*
-    # X-Forwarded-For with $remote_addr (not appends), which is what makes
-    # trusting the first entry safe — an appended header would let a visitor
-    # spoof it. Fall back to request.client.host for local/test runs where
-    # that header is absent.
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
-def _check_rate_limit(request: Request, log: Dict[str, List[datetime]], limit: int, window: timedelta, detail: str) -> None:
-    ip = _client_ip(request)
-    now = datetime.now(timezone.utc)
-    # 창(window)이 지난 IP는 통째로 지움 — 안 그러면 한 번이라도 요청한
-    # IP마다 빈 목록이 프로세스가 살아 있는 내내 쌓여감.
-    for other in [k for k, ts in log.items() if not ts or now - ts[-1] >= window]:
-        del log[other]
-    recent = [t for t in log.get(ip, []) if now - t < window]
-    if len(recent) >= limit:
-        raise HTTPException(status_code=429, detail=detail)
-    recent.append(now)
-    log[ip] = recent
-
-
 def _check_room_rate_limit(request: Request) -> None:
-    _check_rate_limit(request, _room_creations, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW,
+    check_rate_limit(request, _room_creations, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW,
                       "too many rooms created, try again later")
 
 
@@ -129,30 +106,6 @@ def _check_room_rate_limit(request: Request) -> None:
 _feedback_posts: Dict[str, List[datetime]] = {}
 FEEDBACK_LIMIT = 60
 FEEDBACK_WINDOW = timedelta(hours=1)
-
-# 책 검색은 우리 서버가 카카오 키로 대신 묻는 것이라, 막지 않으면 남이 이
-# 엔드포인트로 키의 하루 한도를 다 써버릴 수 있음. 제목 하나 칠 때 5~10번쯤
-# 나가므로(입력 멈출 때마다) 한 학원 30명이 몇 권씩 기록해도 남게 600으로 둠.
-_book_searches: Dict[str, List[datetime]] = {}
-BOOK_SEARCH_LIMIT = 600
-BOOK_SEARCH_WINDOW = timedelta(hours=1)
-
-# 음악 검색은 키가 없는 대신, 우리 서버 IP 하나로 유튜브에 묻는 것이라 누가
-# 이걸로 마구 검색하면 그 IP가 봇으로 찍혀 모두의 검색이 막힐 수 있음 — 책과
-# 같은 한도를 따로 둠(책 검색을 많이 했다고 음악 검색까지 막히지 않게).
-_music_searches: Dict[str, List[datetime]] = {}
-MUSIC_SEARCH_LIMIT = 600
-MUSIC_SEARCH_WINDOW = timedelta(hours=1)
-
-# 영화·애니(TMDB)도 우리 토큰 하나로 묻는 것이라 같은 방식으로 따로 셈 — 감독
-# 조회(고를 때 한 번)도 여기에 같이 셈.
-_screen_searches: Dict[str, List[datetime]] = {}
-SCREEN_SEARCH_LIMIT = 600
-SCREEN_SEARCH_WINDOW = timedelta(hours=1)
-
-# 표지는 한 번 받으면 바뀌지 않으니(주소에 timestamp가 들어 있음) 브라우저가
-# 오래 캐시하게 함 — 같은 표지로 로비를 다시 열 때 우리 서버까지 안 옴.
-COVER_CACHE_SECONDS = 30 * 24 * 3600
 
 
 def _token_matches(given: Optional[str], real: str) -> bool:
@@ -194,99 +147,10 @@ def create_room(request: Request, db: Session = Depends(get_db)):
 def send_feedback(body: schemas.FeedbackIn, request: Request, db: Session = Depends(get_db)):
     """모든 페이지의 "의견 보내기" — 저장만 하고 돌려주는 건 없음. 읽는 API는
     일부러 안 만듦(운영자가 서버에서 psql로 봄)."""
-    _check_rate_limit(request, _feedback_posts, FEEDBACK_LIMIT, FEEDBACK_WINDOW,
+    check_rate_limit(request, _feedback_posts, FEEDBACK_LIMIT, FEEDBACK_WINDOW,
                       "too many feedback, try again later")
     crud.create_feedback(db, body.model_dump())
     return {"ok": True}
-
-
-@app.get("/api/search/book", response_model=List[schemas.BookResult])
-def search_book(
-    request: Request,
-    q: str = Query(..., min_length=1, max_length=100),
-    by: Literal["title", "author"] = "title",
-):
-    """"새 기록" 창의 제목·작가 검색 — 카카오 책 검색을 대신 불러 표지·작가까지
-    채울 수 있게 다듬어 돌려줌. by=author면 작가 이름으로만 찾음(작가 칸).
-    키(KAKAO_REST_KEY)가 없거나 카카오가 응답을 못 하면 503 — 프론트는 이때
-    지금처럼 직접 입력만 하게 됨."""
-    _check_rate_limit(request, _book_searches, BOOK_SEARCH_LIMIT, BOOK_SEARCH_WINDOW,
-                      "too many searches, try again later")
-    try:
-        return book_search.search_books(q.strip(), by_author=(by == "author"))
-    except book_search.SearchUnavailable:
-        raise HTTPException(status_code=503, detail="book search unavailable")
-
-
-@app.get("/api/search/music", response_model=List[schemas.MusicResult])
-def search_music(
-    request: Request,
-    q: str = Query(..., min_length=1, max_length=100),
-    by: Literal["title", "artist"] = "title",
-):
-    """"새 기록" 창 음악 탭의 앨범 검색 — 유튜브 뮤직(비공식 ytmusicapi)에서
-    앨범(가끔 노래)을 찾아 가수·커버를 채울 수 있게 돌려줌(music_search.py
-    위쪽 설명). 유튜브가 응답 형식을 바꾸거나 막으면 503 — 프론트는 이때
-    직접 입력만 하게 됨."""
-    _check_rate_limit(request, _music_searches, MUSIC_SEARCH_LIMIT, MUSIC_SEARCH_WINDOW,
-                      "too many searches, try again later")
-    # by=artist(가수 칸): 그 가수의 앨범·싱글 목록(일반 검색은 앨범 3개뿐이라).
-    try:
-        if by == "artist":
-            return music_search.search_artist(q.strip())
-        return music_search.search_music(q.strip())
-    except music_search.SearchUnavailable:
-        raise HTTPException(status_code=503, detail="music search unavailable")
-
-
-@app.get("/api/search/screen", response_model=List[schemas.ScreenResult])
-def search_screen(
-    request: Request,
-    q: str = Query(..., min_length=1, max_length=100),
-    kind: Literal["movie", "anime"] = "movie",
-    by: Literal["title", "director"] = "title",
-):
-    """"새 기록" 창 영화·애니 탭의 검색 — TMDB에서 한국어 제목·포스터를 찾아 줌
-    (screen_search.py 위쪽 설명). by=title이면 제목으로(감독은 고른 작품만 따로
-    /api/search/screen/creator), by=director면 그 감독의 연출작(감독 이름이
-    creator에 들어 있음). 토큰(TMDB_TOKEN)이 없거나 TMDB가 응답을 못 하면 503."""
-    _check_rate_limit(request, _screen_searches, SCREEN_SEARCH_LIMIT, SCREEN_SEARCH_WINDOW,
-                      "too many searches, try again later")
-    try:
-        if by == "director":
-            return screen_search.search_by_director(q.strip(), kind)
-        return screen_search.search_screen(q.strip(), kind)
-    except screen_search.SearchUnavailable:
-        raise HTTPException(status_code=503, detail="screen search unavailable")
-
-
-@app.get("/api/search/screen/creator", response_model=schemas.ScreenCreatorOut)
-def screen_creator(request: Request, media: Literal["movie", "tv"], id: int = Query(..., ge=1)):
-    """검색 결과에서 고른 영화·TV의 감독 — 못 찾으면 빈 문자열(그 칸은 사용자가
-    직접 씀)."""
-    _check_rate_limit(request, _screen_searches, SCREEN_SEARCH_LIMIT, SCREEN_SEARCH_WINDOW,
-                      "too many searches, try again later")
-    try:
-        return {"creator": screen_search.find_creator(media, id)}
-    except screen_search.SearchUnavailable:
-        raise HTTPException(status_code=503, detail="screen search unavailable")
-
-
-@app.get("/api/cover")
-def relay_cover(url: str = Query(..., max_length=1000)):
-    """카카오 표지를 우리 CORS 헤더로 다시 내보냄(book_search.py 위쪽 설명).
-    카카오 표지 서버만 허용 — 그 밖의 주소는 400."""
-    try:
-        body, content_type = book_search.fetch_cover(url)
-    except book_search.CoverNotAllowed:
-        raise HTTPException(status_code=400, detail="cover host not allowed")
-    except book_search.CoverFetchFailed:
-        raise HTTPException(status_code=502, detail="cover fetch failed")
-    return Response(
-        content=body,
-        media_type=content_type,
-        headers={"Cache-Control": f"public, max-age={COVER_CACHE_SECONDS}, immutable"},
-    )
 
 
 @app.get("/api/rooms", response_model=List[schemas.PublicRoomOut])

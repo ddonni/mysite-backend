@@ -13,10 +13,9 @@ from fastapi.testclient import TestClient
 from app.database import Base, engine
 from app import models
 from app.database import SessionLocal
-from app.main import (
-    BOOK_SEARCH_LIMIT, FEEDBACK_LIMIT, MUSIC_SEARCH_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW,
-    SCREEN_SEARCH_LIMIT, _book_searches, _feedback_posts, _music_searches, _room_creations,
-    _screen_searches, app,
+from app.main import FEEDBACK_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW, _feedback_posts, _room_creations, app
+from app.search_routes import (
+    BOOK_SEARCH_LIMIT, MUSIC_SEARCH_LIMIT, SCREEN_SEARCH_LIMIT, _book_searches, _music_searches, _screen_searches,
 )
 
 client = TestClient(app)
@@ -904,7 +903,7 @@ def kakao(monkeypatch):
     def fake_get(query, key, target=None):
         calls.append((query, key, target))
         return KAKAO_DEMIAN
-    monkeypatch.setattr("app.main.book_search._kakao_get", fake_get)
+    monkeypatch.setattr("app.book_search._kakao_get", fake_get)
     return calls
 
 
@@ -957,7 +956,7 @@ def test_book_search_kakao_failure_is_503(monkeypatch):
 
     def boom(query, key, target=None):
         raise requests.ConnectionError("down")
-    monkeypatch.setattr("app.main.book_search._kakao_get", boom)
+    monkeypatch.setattr("app.book_search._kakao_get", boom)
     assert client.get("/api/search/book", params={"q": "데미안"}).status_code == 503
 
 
@@ -978,7 +977,7 @@ def test_cover_relay_returns_image_with_long_cache(monkeypatch):
     def fake_fetch(url):
         fetched.append(url)
         return b"\xff\xd8jpeg", "image/jpeg"
-    monkeypatch.setattr("app.main.book_search._fetch_image", fake_fetch)
+    monkeypatch.setattr("app.book_search._fetch_image", fake_fetch)
 
     resp = client.get("/api/cover", params={"url": "http://t1.daumcdn.net/lbook/image/540810?timestamp=1"})
     assert resp.status_code == 200
@@ -998,7 +997,7 @@ def test_cover_relay_returns_image_with_long_cache(monkeypatch):
 def test_cover_relay_refuses_other_hosts(monkeypatch, url):
     def never(u):
         raise AssertionError("must not fetch " + u)
-    monkeypatch.setattr("app.main.book_search._fetch_image", never)
+    monkeypatch.setattr("app.book_search._fetch_image", never)
     resp = client.get("/api/cover", params={"url": url})
     assert resp.status_code == 400
     assert resp.json()["detail"] == "cover host not allowed"
@@ -1009,7 +1008,7 @@ def test_cover_relay_upstream_failure_is_502(monkeypatch):
 
     def fail(u):
         raise CoverFetchFailed("status 404")
-    monkeypatch.setattr("app.main.book_search._fetch_image", fail)
+    monkeypatch.setattr("app.book_search._fetch_image", fail)
     resp = client.get("/api/cover", params={"url": "https://t1.daumcdn.net/lbook/image/1"})
     assert resp.status_code == 502
 
@@ -1037,7 +1036,7 @@ def ytm(monkeypatch):
     def fake_search(query, auth_file):
         calls.append((query, auth_file))
         return YTM_RESULTS
-    monkeypatch.setattr("app.main.music_search._search", fake_search)
+    monkeypatch.setattr("app.music_search._search", fake_search)
     return calls
 
 
@@ -1062,7 +1061,7 @@ def test_music_search_falls_back_to_anonymous_when_signed_in_search_fails(monkey
         if auth_file:
             raise Exception("cookies expired")
         return YTM_RESULTS
-    monkeypatch.setattr("app.main.music_search._search", fake_search)
+    monkeypatch.setattr("app.music_search._search", fake_search)
 
     resp = client.get("/api/search/music", params={"q": "꽃갈피"})
     assert resp.status_code == 200
@@ -1073,7 +1072,7 @@ def test_music_search_falls_back_to_anonymous_when_signed_in_search_fails(monkey
 def test_music_search_youtube_failure_is_503(monkeypatch):
     def boom(query, auth_file):
         raise KeyError("contents")  # 유튜브 응답 형식이 바뀌어 ytmusicapi가 깨진 경우
-    monkeypatch.setattr("app.main.music_search._search", boom)
+    monkeypatch.setattr("app.music_search._search", boom)
     resp = client.get("/api/search/music", params={"q": "꽃갈피"})
     assert resp.status_code == 503
     assert resp.json()["detail"] == "music search unavailable"
@@ -1139,7 +1138,7 @@ def tmdb(monkeypatch):
     def fake_get(path, params, token):
         calls.append((path, params, token))
         return responses.get(path, {"crew": []})
-    monkeypatch.setattr("app.main.screen_search._tmdb_get", fake_get)
+    monkeypatch.setattr("app.screen_search._tmdb_get", fake_get)
     return calls
 
 
@@ -1223,7 +1222,7 @@ def test_screen_search_by_director_movie_tab_keeps_movies_only(tmdb):
 def test_screen_search_by_director_no_director_found_is_empty(tmdb, monkeypatch):
     def only_actors(path, params, token):
         return {"results": [{"id": 1, "name": "배우", "known_for_department": "Acting"}]}
-    monkeypatch.setattr("app.main.screen_search._tmdb_get", only_actors)
+    monkeypatch.setattr("app.screen_search._tmdb_get", only_actors)
     assert client.get("/api/search/screen", params={"q": "배우", "by": "director"}).json() == []
 
 
@@ -1239,7 +1238,7 @@ ARTIST_PAGE = {
 
 def test_music_search_by_artist_lists_the_artists_albums_then_singles(monkeypatch):
     calls = []
-    monkeypatch.setattr("app.main.music_search._search", lambda q, auth: [
+    monkeypatch.setattr("app.music_search._search", lambda q, auth: [
         {"resultType": "artist", "artist": None},  # 맨 위 가수 카드는 이름·id를 못 읽을 때가 있음
         {"resultType": "album", "title": "TEAM BABY", "artists": [{"name": "검정치마", "id": "UCR90"}]},
     ])
@@ -1247,7 +1246,7 @@ def test_music_search_by_artist_lists_the_artists_albums_then_singles(monkeypatc
     def fake_artist(channel):
         calls.append(channel)
         return ARTIST_PAGE
-    monkeypatch.setattr("app.main.music_search._artist", fake_artist)
+    monkeypatch.setattr("app.music_search._artist", fake_artist)
 
     resp = client.get("/api/search/music", params={"q": "검정치마", "by": "artist"})
     assert resp.status_code == 200
@@ -1259,11 +1258,11 @@ def test_music_search_by_artist_lists_the_artists_albums_then_singles(monkeypatc
 
 
 def test_music_search_by_artist_falls_back_to_plain_results(monkeypatch):
-    monkeypatch.setattr("app.main.music_search._search", lambda q, auth: YTM_RESULTS)
+    monkeypatch.setattr("app.music_search._search", lambda q, auth: YTM_RESULTS)
 
     def broken(channel):
         raise KeyError("contents")
-    monkeypatch.setattr("app.main.music_search._artist", broken)
+    monkeypatch.setattr("app.music_search._artist", broken)
     resp = client.get("/api/search/music", params={"q": "아이유", "by": "artist"})
     assert [r["album"] for r in resp.json()] == ["꽃갈피", "꽃갈피"]  # 일반 검색 결과로 대신
 

@@ -113,7 +113,9 @@ DATABASE_URL=postgresql+psycopg2://sketchbook:sketchbook@localhost:5432/sketchbo
 
 ```
 app/
-  main.py       # FastAPI 앱, CORS, WebSocket ConnectionManager, 모든 라우트
+  main.py       # FastAPI 앱, CORS, WebSocket ConnectionManager, 방·그림·기록·구글·업로드 라우트
+  search_routes.py # 외부 검색 라우트(책·음악·영화·애니·표지 중계) + 그 횟수 한도 — main.py가 include
+  ratelimit.py  # IP별 횟수 제한(client_ip, check_rate_limit) — 방 생성·피드백·검색이 같이 씀
   models.py     # SQLAlchemy 모델 (Room, Page, Record, Feedback)
   schemas.py    # Pydantic 스키마
   crud.py       # DB 접근 로직, 방 코드/토큰 생성
