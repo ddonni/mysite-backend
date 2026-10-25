@@ -107,6 +107,24 @@ class MusicResult(BaseModel):
     cover: Optional[str] = None
 
 
+class ScreenResult(BaseModel):
+    """GET /api/search/screen — one TMDB movie/TV hit. No director here (it
+    costs a request per title); the form asks GET /api/search/screen/creator
+    for the one the user picks. original_title is "" when it's the same as
+    title."""
+
+    id: int
+    media: Literal["movie", "tv"]
+    title: str
+    original_title: str
+    year: str
+    cover: Optional[str] = None
+
+
+class ScreenCreatorOut(BaseModel):
+    creator: str
+
+
 class GoogleStatusOut(BaseModel):
     """GET /api/rooms/{code}/google — lets the frontend swap the sign-in
     button for "linked as <email>" once a room already has one linked."""

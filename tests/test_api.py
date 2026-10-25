@@ -15,7 +15,8 @@ from app import models
 from app.database import SessionLocal
 from app.main import (
     BOOK_SEARCH_LIMIT, FEEDBACK_LIMIT, MUSIC_SEARCH_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW,
-    _book_searches, _feedback_posts, _music_searches, _room_creations, app,
+    SCREEN_SEARCH_LIMIT, _book_searches, _feedback_posts, _music_searches, _room_creations,
+    _screen_searches, app,
 )
 
 client = TestClient(app)
@@ -36,6 +37,7 @@ def fresh_database():
     _feedback_posts.clear()
     _book_searches.clear()
     _music_searches.clear()
+    _screen_searches.clear()
     yield
     Base.metadata.drop_all(bind=engine)
 
@@ -1083,3 +1085,106 @@ def test_music_search_rate_limit(ytm):
     assert ytm == []
     # 책 검색 한도와는 따로 셈
     assert "testclient" not in _book_searches
+
+
+# --- movie/anime search (GET /api/search/screen, /api/search/screen/creator) ---
+
+TMDB_MULTI = {"results": [
+    {"media_type": "tv", "id": 1429, "name": "진격의 거인", "original_name": "進撃の巨人",
+     "first_air_date": "2013-04-07", "genre_ids": [16, 10765], "poster_path": "/a.jpg"},
+    {"media_type": "movie", "id": 99, "title": "진격의 거인 실사판", "original_title": "進撃の巨人",
+     "release_date": "2015-08-01", "genre_ids": [28], "poster_path": "/b.jpg"},  # 애니 아님
+    {"media_type": "person", "id": 5, "name": "진격"},
+    {"media_type": "movie", "id": 4935, "title": "하울의 움직이는 성", "original_title": "ハウルの動く城",
+     "release_date": "2004-11-19", "genre_ids": [14, 16], "poster_path": None},
+]}
+TMDB_MOVIE = {"results": [
+    {"id": 157336, "title": "인터스텔라", "original_title": "Interstellar", "release_date": "2014-11-05",
+     "poster_path": "/gD.jpg"},
+    {"id": 496243, "title": "기생충", "original_title": "기생충", "release_date": "2019-05-30",
+     "poster_path": "/jj.jpg"},
+]}
+
+
+@pytest.fixture
+def tmdb(monkeypatch):
+    """TMDB 토큰이 있는 것처럼 하고, (path, params)를 기록하며 path별 가짜 응답을 줌."""
+    monkeypatch.setenv("TMDB_TOKEN", "test-token")
+    calls = []
+    responses = {
+        "/search/multi": TMDB_MULTI,
+        "/search/movie": TMDB_MOVIE,
+        "/movie/496243/credits": {"crew": [
+            {"job": "Producer", "name": "곽신애"}, {"job": "Director", "name": "봉준호"}]},
+        "/tv/1429/aggregate_credits": {"crew": [
+            {"name": "회차 연출", "jobs": [{"job": "Director"}]},
+            {"name": "아라키 테츠로", "jobs": [{"job": "Series Director"}]}]},
+        "/tv/2/aggregate_credits": {"crew": [
+            {"name": "각본가", "jobs": [{"job": "Writer"}]},
+            {"name": "와타나베 신이치로", "jobs": [{"job": "Director"}]}]},
+    }
+
+    def fake_get(path, params, token):
+        calls.append((path, params, token))
+        return responses.get(path, {"crew": []})
+    monkeypatch.setattr("app.main.screen_search._tmdb_get", fake_get)
+    return calls
+
+
+def test_screen_search_movie(tmdb):
+    resp = client.get("/api/search/screen", params={"q": " 인터스텔라 ", "kind": "movie"})
+    assert resp.status_code == 200
+    assert tmdb[0][:1] == ("/search/movie",) and tmdb[0][1]["query"] == "인터스텔라" and tmdb[0][2] == "test-token"
+    assert resp.json() == [
+        {"id": 157336, "media": "movie", "title": "인터스텔라", "original_title": "Interstellar", "year": "2014",
+         "cover": "https://image.tmdb.org/t/p/w342/gD.jpg"},
+        # 원제가 한국어 제목과 같으면 비워 둠(목록에 같은 말을 두 번 안 씀)
+        {"id": 496243, "media": "movie", "title": "기생충", "original_title": "", "year": "2019",
+         "cover": "https://image.tmdb.org/t/p/w342/jj.jpg"},
+    ]
+
+
+def test_screen_search_anime_keeps_animation_movies_and_tv_only(tmdb):
+    resp = client.get("/api/search/screen", params={"q": "진격", "kind": "anime"})
+    assert tmdb[0][0] == "/search/multi"
+    assert [(r["media"], r["title"], r["cover"]) for r in resp.json()] == [
+        ("tv", "진격의 거인", "https://image.tmdb.org/t/p/w342/a.jpg"),
+        ("movie", "하울의 움직이는 성", None),
+    ]
+
+
+def test_screen_search_without_token_is_503(monkeypatch):
+    monkeypatch.delenv("TMDB_TOKEN", raising=False)
+    resp = client.get("/api/search/screen", params={"q": "기생충"})
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "screen search unavailable"
+
+
+def test_screen_search_unknown_kind_is_422(tmdb):
+    assert client.get("/api/search/screen", params={"q": "기생충", "kind": "drama"}).status_code == 422
+
+
+def test_screen_creator_movie_director(tmdb):
+    resp = client.get("/api/search/screen/creator", params={"media": "movie", "id": 496243})
+    assert resp.json() == {"creator": "봉준호"}
+
+
+def test_screen_creator_tv_prefers_series_director(tmdb):
+    resp = client.get("/api/search/screen/creator", params={"media": "tv", "id": 1429})
+    assert resp.json() == {"creator": "아라키 테츠로"}
+
+
+def test_screen_creator_tv_falls_back_to_first_director(tmdb):
+    resp = client.get("/api/search/screen/creator", params={"media": "tv", "id": 2})
+    assert resp.json() == {"creator": "와타나베 신이치로"}
+
+
+def test_screen_creator_unknown_is_empty(tmdb):
+    assert client.get("/api/search/screen/creator", params={"media": "movie", "id": 1}).json() == {"creator": ""}
+
+
+def test_screen_search_rate_limit(tmdb):
+    _screen_searches["testclient"] = [datetime.now(timezone.utc)] * SCREEN_SEARCH_LIMIT
+    assert client.get("/api/search/screen", params={"q": "기생충"}).status_code == 429
+    assert client.get("/api/search/screen/creator", params={"media": "movie", "id": 1}).status_code == 429
+    assert tmdb == []

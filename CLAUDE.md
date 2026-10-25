@@ -120,6 +120,7 @@ app/
   storage.py    # S3 사진 업로드
   book_search.py # 카카오 책 검색 + 표지 중계(허용 서버만)
   music_search.py # 유튜브 뮤직 앨범 검색(ytmusicapi, 비공식)
+  screen_search.py # 영화·애니 검색 + 고른 작품의 감독(TMDB)
   google_auth.py # 구글 ID 토큰 검증
   migrations.py # 시작 시 Postgres에 alembic upgrade head를 실행 (SQLite는 스킵)
 alembic.ini
@@ -153,7 +154,9 @@ tests/test_api.py
   책 검색(`GET /api/search/book`)은 키가 없거나 카카오가 응답을 못 하면 503
   `"book search unavailable"`, IP당 한 시간 600번을 넘으면 429 `"too many searches,
   try again later"`. 표지 중계(`GET /api/cover`)는 허용 서버가 아니면 400
-  `"cover host not allowed"`, 원본을 못 받으면 502 `"cover fetch failed"`. 음악 검색
+  `"cover host not allowed"`, 원본을 못 받으면 502 `"cover fetch failed"`. 영화·애니 검색
+  (`GET /api/search/screen`, `/api/search/screen/creator`)은 토큰이 없거나 TMDB가 응답을
+  못 하면 503 `"screen search unavailable"`. 음악 검색
   (`GET /api/search/music`)은 유튜브 쪽이 실패하면 503 `"music search unavailable"`,
   한도(책과 따로 IP당 한 시간 600번)를 넘으면 429 `"too many searches, try again later"`(프론트는
   검색 실패를 "결과 없음"으로, 표지 실패를 제목 카드로 대신함 — 문자열로 구분하진 않음).
@@ -187,6 +190,14 @@ tests/test_api.py
   복구하는 방과 다를 때만 채움(기록도 그림도 없으면 true, `crud.is_room_empty`) —
   프론트가 새 브라우저의 빈 방이면 묻지 않고 넘어가는 데 씀. 토큰 없이 남의 방이
   비었는지 알아낼 수 없게 하려는 것이라 이 조건을 풀지 말 것.
+- 영화·애니 검색: `TMDB_TOKEN`(비밀, 선택 — TMDB의 "API 읽기 액세스 토큰", 헤더로 보냄)으로
+  `GET /api/search/screen?q=&kind=movie|anime`가 `language=ko-KR`로 찾아
+  `[{id, media: movie|tv, title, original_title, year, cover}]`를 돌려줌(`app/screen_search.py`).
+  anime는 `/search/multi`에서 애니메이션 장르(16)인 영화·TV만. 검색 결과엔 감독이 없어서
+  고른 작품만 `GET /api/search/screen/creator?media=&id=`로 따로 물음(영화는 credits의
+  Director, TV는 aggregate_credits에서 Series/Chief Director를 먼저, 없으면 첫 Director).
+  포스터(image.tmdb.org)는 CORS를 줘서 중계 안 함. 한도는 책·음악과 따로 IP당 한 시간 600번
+  (감독 조회 포함). 비상업 무료 — 프론트가 "정보 제공: TMDB" + 보증 아님 문구를 띄움.
 - 음악 검색: `GET /api/search/music?q=`는 **비공식** ytmusicapi로 유튜브 뮤직을 검색해
   `[{album, song, creator, kind, year, cover}]`를 돌려줌(`app/music_search.py`). 키는 없지만
   유튜브가 응답 형식을 바꾸면 언제든 깨질 수 있어서 실패는 전부 503(프론트는 결과 없음으로).

@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Reques
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from . import book_search, crud, google_auth, models, music_search, schemas, storage
+from . import book_search, crud, google_auth, models, music_search, schemas, screen_search, storage
 from .database import Base, SessionLocal, engine, get_db
 from .migrations import run_startup_migrations
 
@@ -144,6 +144,12 @@ _music_searches: Dict[str, List[datetime]] = {}
 MUSIC_SEARCH_LIMIT = 600
 MUSIC_SEARCH_WINDOW = timedelta(hours=1)
 
+# 영화·애니(TMDB)도 우리 토큰 하나로 묻는 것이라 같은 방식으로 따로 셈 — 감독
+# 조회(고를 때 한 번)도 여기에 같이 셈.
+_screen_searches: Dict[str, List[datetime]] = {}
+SCREEN_SEARCH_LIMIT = 600
+SCREEN_SEARCH_WINDOW = timedelta(hours=1)
+
 # 표지는 한 번 받으면 바뀌지 않으니(주소에 timestamp가 들어 있음) 브라우저가
 # 오래 캐시하게 함 — 같은 표지로 로비를 다시 열 때 우리 서버까지 안 옴.
 COVER_CACHE_SECONDS = 30 * 24 * 3600
@@ -224,6 +230,36 @@ def search_music(request: Request, q: str = Query(..., min_length=1, max_length=
         return music_search.search_music(q.strip())
     except music_search.SearchUnavailable:
         raise HTTPException(status_code=503, detail="music search unavailable")
+
+
+@app.get("/api/search/screen", response_model=List[schemas.ScreenResult])
+def search_screen(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=100),
+    kind: Literal["movie", "anime"] = "movie",
+):
+    """"새 기록" 창 영화·애니 탭의 제목 검색 — TMDB에서 한국어 제목·포스터를
+    찾아 줌(screen_search.py 위쪽 설명). 감독은 고른 작품만 따로
+    (/api/search/screen/creator). 토큰(TMDB_TOKEN)이 없거나 TMDB가 응답을
+    못 하면 503."""
+    _check_rate_limit(request, _screen_searches, SCREEN_SEARCH_LIMIT, SCREEN_SEARCH_WINDOW,
+                      "too many searches, try again later")
+    try:
+        return screen_search.search_screen(q.strip(), kind)
+    except screen_search.SearchUnavailable:
+        raise HTTPException(status_code=503, detail="screen search unavailable")
+
+
+@app.get("/api/search/screen/creator", response_model=schemas.ScreenCreatorOut)
+def screen_creator(request: Request, media: Literal["movie", "tv"], id: int = Query(..., ge=1)):
+    """검색 결과에서 고른 영화·TV의 감독 — 못 찾으면 빈 문자열(그 칸은 사용자가
+    직접 씀)."""
+    _check_rate_limit(request, _screen_searches, SCREEN_SEARCH_LIMIT, SCREEN_SEARCH_WINDOW,
+                      "too many searches, try again later")
+    try:
+        return {"creator": screen_search.find_creator(media, id)}
+    except screen_search.SearchUnavailable:
+        raise HTTPException(status_code=503, detail="screen search unavailable")
 
 
 @app.get("/api/cover")
