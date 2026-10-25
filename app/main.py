@@ -78,7 +78,7 @@ manager = ConnectionManager()
 # Anyone can create a room with no login, so this is the one endpoint that's
 # open to spam (each room costs a Postgres row and, once used, S3 storage).
 # A per-IP fixed-window counter in process memory is enough at this site's
-# scale (Render free tier runs a single instance, and rooms are only ever
+# scale (one uvicorn process on one server, and rooms are only ever
 # shared with a handful of people) — no Redis needed.
 #
 # 한도는 "한 사람"이 아니라 "공인 IP 하나" 기준이라는 점에 주의 — 학원·회사처럼
@@ -92,10 +92,12 @@ ROOM_CREATE_WINDOW = timedelta(hours=1)
 
 
 def _client_ip(request: Request) -> str:
-    # Render terminates TLS and proxies to the container, so
-    # request.client.host is Render's internal IP, not the visitor's — the
-    # real IP is the first entry Render adds to X-Forwarded-For. Fall back
-    # to request.client.host for local/test runs where that header is absent.
+    # Nginx terminates TLS and proxies to uvicorn on 127.0.0.1, so
+    # request.client.host is the proxy, not the visitor. Nginx *overwrites*
+    # X-Forwarded-For with $remote_addr (not appends), which is what makes
+    # trusting the first entry safe — an appended header would let a visitor
+    # spoof it. Fall back to request.client.host for local/test runs where
+    # that header is absent.
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()

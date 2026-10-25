@@ -85,9 +85,9 @@
   (`disable_existing_loggers=False`), PostgreSQL 재시작 뒤 첫 요청 500
   (`create_engine(..., pool_pre_ping=True)`). 둘 다 지우면 안 됨.
 
-**Render + Neon은 롤백용으로만 남아 있음** (병행 운영이 끝나면 정리 예정). Render는
-`main` push 때 여전히 배포될 수 있지만 프런트가 더는 그쪽을 보지 않음. `render.yaml`,
-Neon 관련 설명은 그때 함께 정리함.
+**Render 서비스와 Neon 프로젝트는 2026-10-25 삭제함** (병행 운영 종료, `render.yaml`도
+지움). 그래서 EC2에 큰 문제가 생기면 돌아갈 곳은 없고, 서버를 다시 만들고 S3 백업으로
+복원해야 함(`mysite-infra` README "롤백·복구 방법").
 
 ## 빌드/테스트 명령
 

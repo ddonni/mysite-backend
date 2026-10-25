@@ -268,9 +268,10 @@ def list_records(db: Session, room_id: int, cat: Optional[str] = None) -> list:
     return q.order_by(models.Record.date.desc(), models.Record.id.desc()).all()
 
 
-# 기록 날짜는 "사용자가 사는 곳의 오늘" — 서버(Render)는 UTC라 date.today()를
-# 쓰면 한국 시간 0~9시에 남긴 기록이 어제 날짜로 찍혔음. 한국은 서머타임이
-# 없어서 고정 +9시간이면 충분함(tzdata 패키지 없이도 동작).
+# 기록 날짜는 "사용자가 사는 곳의 오늘" — 예전 서버(Render)는 UTC라 date.today()를
+# 쓰면 한국 시간 0~9시에 남긴 기록이 어제 날짜로 찍혔음. 지금 서버는 Asia/Seoul이지만
+# 서버 시간대 설정에 기대지 않으려고 그대로 둠. 한국은 서머타임이 없어서 고정
+# +9시간이면 충분함(tzdata 패키지 없이도 동작).
 KST = timezone(timedelta(hours=9))
 
 

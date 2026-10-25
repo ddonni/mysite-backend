@@ -1,10 +1,10 @@
 """Runs Alembic migrations against Postgres at startup.
 
 This project has no separate deploy step for schema changes — main.py's
-lifespan calls run_startup_migrations() every time the app boots, so a
-`git push` to main is enough: Render rebuilds the image and the new
-revision(s) under alembic/versions/ get applied before the app starts
-serving traffic.
+lifespan calls run_startup_migrations() every time the app boots, so
+pulling the new code on the server and restarting the service is enough:
+the new revision(s) under alembic/versions/ get applied before the app
+starts serving traffic.
 
 Before this, schema changes were hand-written idempotent ALTER TABLE
 statements in this same file (see git history) — that didn't scale past a

@@ -63,7 +63,7 @@ docker compose up --build
 - 배포는 지금 수동임: 서버에서 `git pull` → (의존성이 바뀌었으면 `pip install`) →
   `systemctl restart`. GitHub Actions로 자동화하는 건 다음 단계.
 
-`render.yaml`은 롤백용으로 남겨 둔 예전 Render 설정임(병행 운영이 끝나면 정리).
+Render 서비스와 Neon DB는 병행 운영을 마치고 2026-10-25에 삭제함(`render.yaml`도 지움).
 
 스키마 변경은 [Alembic](https://alembic.sqlalchemy.org/)으로 관리함
 (`alembic/versions/`). 기동할 때마다 `app/migrations.py`가 자동으로
