@@ -15,7 +15,7 @@ from app import models
 from app.database import SessionLocal
 from app.main import FEEDBACK_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW, _feedback_posts, _room_creations, app
 from app.search_routes import (
-    BOOK_SEARCH_LIMIT, MUSIC_SEARCH_LIMIT, SCREEN_SEARCH_LIMIT, _book_searches, _music_searches, _screen_searches,
+    SEARCH_CACHES, BOOK_SEARCH_LIMIT, MUSIC_SEARCH_LIMIT, SCREEN_SEARCH_LIMIT, _book_searches, _music_searches, _screen_searches,
 )
 
 client = TestClient(app)
@@ -37,6 +37,8 @@ def fresh_database():
     _book_searches.clear()
     _music_searches.clear()
     _screen_searches.clear()
+    for c in SEARCH_CACHES:  # 테스트마다 다른 가짜 응답을 쓰니 기억한 검색 결과도 비움
+        c.clear()
     yield
     Base.metadata.drop_all(bind=engine)
 
@@ -1269,3 +1271,45 @@ def test_music_search_by_artist_falls_back_to_plain_results(monkeypatch):
 
 def test_music_search_unknown_by_is_422(ytm):
     assert client.get("/api/search/music", params={"q": "x", "by": "album"}).status_code == 422
+
+
+# --- search cache (app/cache.py) ---
+
+def test_same_book_search_is_answered_from_cache(kakao):
+    client.get("/api/search/book", params={"q": "데미안"})
+    client.get("/api/search/book", params={"q": " 데미안 "})  # 앞뒤 공백만 다른 것도 같은 검색
+    client.get("/api/search/book", params={"q": "데미안", "by": "author"})  # 작가 검색은 따로
+    assert [c[2] for c in kakao] == [None, "person"]
+
+
+def test_failed_search_is_not_cached(monkeypatch):
+    import requests
+    monkeypatch.setenv("KAKAO_REST_KEY", "test-key")
+    calls = []
+
+    def flaky(query, key, target=None):
+        calls.append(query)
+        if len(calls) == 1:
+            raise requests.ConnectionError("down")
+        return KAKAO_DEMIAN
+    monkeypatch.setattr("app.book_search._kakao_get", flaky)
+    assert client.get("/api/search/book", params={"q": "데미안"}).status_code == 503
+    assert client.get("/api/search/book", params={"q": "데미안"}).status_code == 200  # 다시 물어봄
+    assert len(calls) == 2
+
+
+def test_cache_expires_and_drops_oldest(monkeypatch):
+    from app.cache import TTLCache
+    now = [100.0]
+    monkeypatch.setattr("app.cache.time.monotonic", lambda: now[0])
+    c = TTLCache(ttl_seconds=10, max_entries=2)
+    n = []
+    get = lambda k: c.get_or_set(k, lambda: n.append(k) or k)
+    get("a"); get("a")
+    assert n == ["a"]
+    now[0] += 11
+    get("a")  # 10초 지나면 다시 계산
+    assert n == ["a", "a"]
+    get("b"); get("c")  # 최대 2개 — 가장 오래된 a가 빠짐
+    get("a")
+    assert n == ["a", "a", "b", "c", "a"]

@@ -116,6 +116,7 @@ app/
   main.py       # FastAPI 앱, CORS, WebSocket ConnectionManager, 방·그림·기록·구글·업로드 라우트
   search_routes.py # 외부 검색 라우트(책·음악·영화·애니·표지 중계) + 그 횟수 한도 — main.py가 include
   ratelimit.py  # IP별 횟수 제한(client_ip, check_rate_limit) — 방 생성·피드백·검색이 같이 씀
+  cache.py      # 검색 결과 메모리 캐시(TTLCache) — search_routes.py가 책·음악·영화 검색에 10분씩
   models.py     # SQLAlchemy 모델 (Room, Page, Record, Feedback)
   schemas.py    # Pydantic 스키마
   crud.py       # DB 접근 로직, 방 코드/토큰 생성
@@ -192,6 +193,11 @@ tests/test_api.py
   복구하는 방과 다를 때만 채움(기록도 그림도 없으면 true, `crud.is_room_empty`) —
   프론트가 새 브라우저의 빈 방이면 묻지 않고 넘어가는 데 씀. 토큰 없이 남의 방이
   비었는지 알아낼 수 없게 하려는 것이라 이 조건을 풀지 말 것.
+- 검색 캐시: 책·음악·영화·애니 검색과 감독 조회는 같은 요청이면 10분 동안 외부 API에 다시 묻지
+  않음(`search_routes.py`의 `SEARCH_CACHE_SECONDS`, 종류마다 최대 500개, `app/cache.py`).
+  **실패(503)는 기억하지 않음** — 잠깐의 장애가 10분 동안 굳지 않게. 표지 중계는 브라우저가 30일
+  캐시해서 서버 캐시 안 함. IP별 횟수 제한은 캐시와 상관없이 그대로 셈. 테스트는 매번 캐시를
+  비움(`SEARCH_CACHES`) — 안 그러면 앞 테스트의 가짜 응답이 다음 테스트로 새어 나옴.
 - 영화·애니 검색: `TMDB_TOKEN`(비밀, 선택 — TMDB의 "API 읽기 액세스 토큰", 헤더로 보냄)으로
   `GET /api/search/screen?q=&kind=movie|anime&by=title|director`가 `language=ko-KR`로 찾아
   `[{id, media: movie|tv, title, original_title, year, cover, creator}]`를 돌려줌(`app/screen_search.py`).

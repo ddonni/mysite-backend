@@ -9,6 +9,7 @@ from typing import Dict, List, Literal
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from . import book_search, music_search, schemas, screen_search
+from .cache import TTLCache
 from .ratelimit import check_rate_limit
 
 router = APIRouter()
@@ -39,6 +40,14 @@ COVER_CACHE_SECONDS = 30 * 24 * 3600
 
 TOO_MANY = "too many searches, try again later"
 
+# 같은 검색은 10분 동안 다시 묻지 않음(cache.py). 종류마다 따로 최대 500개 — 결과 한 건이
+# 몇 KB라 다 차도 몇 MB. 감독 조회도 같은 작품을 여러 사람이 고르니 같이 기억함.
+SEARCH_CACHE_SECONDS = 10 * 60
+_book_cache = TTLCache(SEARCH_CACHE_SECONDS, 500)
+_music_cache = TTLCache(SEARCH_CACHE_SECONDS, 500)
+_screen_cache = TTLCache(SEARCH_CACHE_SECONDS, 500)
+SEARCH_CACHES = (_book_cache, _music_cache, _screen_cache)
+
 
 @router.get("/api/search/book", response_model=List[schemas.BookResult])
 def search_book(
@@ -52,7 +61,8 @@ def search_book(
     지금처럼 직접 입력만 하게 됨."""
     check_rate_limit(request, _book_searches, BOOK_SEARCH_LIMIT, BOOK_SEARCH_WINDOW, TOO_MANY)
     try:
-        return book_search.search_books(q.strip(), by_author=(by == "author"))
+        q = q.strip()
+        return _book_cache.get_or_set((q, by), lambda: book_search.search_books(q, by_author=(by == "author")))
     except book_search.SearchUnavailable:
         raise HTTPException(status_code=503, detail="book search unavailable")
 
@@ -70,9 +80,10 @@ def search_music(
     입력만 하게 됨."""
     check_rate_limit(request, _music_searches, MUSIC_SEARCH_LIMIT, MUSIC_SEARCH_WINDOW, TOO_MANY)
     try:
+        q = q.strip()
         if by == "artist":
-            return music_search.search_artist(q.strip())
-        return music_search.search_music(q.strip())
+            return _music_cache.get_or_set((q, by), lambda: music_search.search_artist(q))
+        return _music_cache.get_or_set((q, by), lambda: music_search.search_music(q))
     except music_search.SearchUnavailable:
         raise HTTPException(status_code=503, detail="music search unavailable")
 
@@ -90,9 +101,10 @@ def search_screen(
     creator에 들어 있음). 토큰(TMDB_TOKEN)이 없거나 TMDB가 응답을 못 하면 503."""
     check_rate_limit(request, _screen_searches, SCREEN_SEARCH_LIMIT, SCREEN_SEARCH_WINDOW, TOO_MANY)
     try:
+        q = q.strip()
         if by == "director":
-            return screen_search.search_by_director(q.strip(), kind)
-        return screen_search.search_screen(q.strip(), kind)
+            return _screen_cache.get_or_set((q, kind, by), lambda: screen_search.search_by_director(q, kind))
+        return _screen_cache.get_or_set((q, kind, by), lambda: screen_search.search_screen(q, kind))
     except screen_search.SearchUnavailable:
         raise HTTPException(status_code=503, detail="screen search unavailable")
 
@@ -103,7 +115,7 @@ def screen_creator(request: Request, media: Literal["movie", "tv"], id: int = Qu
     직접 씀)."""
     check_rate_limit(request, _screen_searches, SCREEN_SEARCH_LIMIT, SCREEN_SEARCH_WINDOW, TOO_MANY)
     try:
-        return {"creator": screen_search.find_creator(media, id)}
+        return {"creator": _screen_cache.get_or_set(("creator", media, id), lambda: screen_search.find_creator(media, id))}
     except screen_search.SearchUnavailable:
         raise HTTPException(status_code=503, detail="screen search unavailable")
 
