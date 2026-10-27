@@ -1,3 +1,4 @@
+import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -6,6 +7,7 @@ from typing import Dict, List, Literal, Optional, Tuple
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from . import crud, google_auth, models, schemas, search_routes, storage
@@ -131,8 +133,31 @@ def require_owner(room: models.Room = Depends(get_room), x_room_token: Optional[
     return room
 
 
+# uvicorn이 이미 설정해 둔 로거 — 여기에 쓰면 journalctl에 그대로 남음.
+log = logging.getLogger("uvicorn.error")
+
+
+# liveness: 앱 프로세스가 살아서 응답하는지만 봄(DB 안 씀). 응답 시간 측정의
+# 기준선이기도 함(mysite-infra MEASUREMENTS.md).
 @app.get("/health")
 def health_check():
+    return {"status": "healthy"}
+
+
+# readiness: DB까지 실제로 조회되는지 봄. /health만 보면 DB가 죽어도 healthy라
+# 장애를 놓침(mysite-infra 트러블슈팅 #11). 바깥 감시 도구가 1분마다 부르므로
+# 실제 테이블에서 한 줄만 읽는 가벼운 조회 — 0줄이어도 결과가 오면 정상.
+@app.get("/health/db")
+def health_check_db(db: Session = Depends(get_db)):
+    try:
+        if engine.dialect.name == "postgresql":
+            # 접속은 됐는데 쿼리가 멈추는 경우(잠금 등) 대비. 이 요청 안에서만 적용.
+            db.execute(text("SET LOCAL statement_timeout = '3s'"))
+        db.execute(text("SELECT 1 FROM rooms LIMIT 1"))
+    except Exception:
+        # 실패 이유(DB 주소 등이 섞일 수 있음)는 응답에 안 넣고 서버 로그에만 남김.
+        log.exception("health/db: database check failed")
+        raise HTTPException(status_code=503, detail="database unavailable")
     return {"status": "healthy"}
 
 

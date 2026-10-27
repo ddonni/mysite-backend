@@ -20,6 +20,10 @@ if not DATABASE_URL:
 # SQLite needs this flag when used from a multi-threaded server like uvicorn;
 # PostgreSQL doesn't, so only pass it when we're actually pointed at SQLite.
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+# connect_timeout: libpq 기본값은 "무한정 기다림"이라, DB 쪽이 응답 없이 멈추면 요청도
+# 같이 멈춤. 몇 초 안에 포기하고 에러를 내야 /health/db가 503으로 답할 수 있음.
+if DATABASE_URL.startswith("postgresql"):
+    connect_args["connect_timeout"] = 3
 
 # pool_pre_ping: 풀에 있던 연결을 꺼낼 때 살아 있는지 먼저 확인함. PostgreSQL이
 # 재시작되면(예: 새벽 자동 업데이트) 풀의 연결이 전부 끊기는데, 이게 없으면 그 뒤

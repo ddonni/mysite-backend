@@ -9,8 +9,9 @@ os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import OperationalError
 
-from app.database import Base, engine
+from app.database import Base, engine, get_db
 from app import models
 from app.database import SessionLocal
 from app.main import FEEDBACK_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW, _feedback_posts, _room_creations, app
@@ -79,6 +80,45 @@ def test_health_check():
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "healthy"}
+
+
+def test_health_check_db():
+    resp = client.get("/health/db")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "healthy"}
+
+
+class _BrokenSession:
+    """DB가 죽은 상황 흉내 — 쿼리를 받으면 진짜 세션처럼 연결 에러를 던짐."""
+
+    def execute(self, *args, **kwargs):
+        raise OperationalError("SELECT 1", {}, Exception("connection refused"))
+
+
+def _broken_get_db():
+    yield _BrokenSession()
+
+
+def test_health_check_db_fail():
+    app.dependency_overrides[get_db] = _broken_get_db
+    try:
+        resp = client.get("/health/db")
+    finally:
+        # 안 지우면 뒤에 도는 다른 테스트도 전부 가짜 DB를 씀.
+        app.dependency_overrides.pop(get_db, None)
+    assert resp.status_code == 503
+    # 실패 이유(에러 메시지)는 응답에 새면 안 됨.
+    assert resp.json() == {"detail": "database unavailable"}
+
+
+def test_health_check_ignores_db():
+    # liveness는 DB가 죽어도 200이어야 함 — 프로세스만 봄.
+    app.dependency_overrides[get_db] = _broken_get_db
+    try:
+        resp = client.get("/health")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+    assert resp.status_code == 200
 
 
 # --- rooms ---
