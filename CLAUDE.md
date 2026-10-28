@@ -53,9 +53,9 @@
 - **S3(boto3)** — 기록 보관소의 사진 저장소. DB에는 이미지 바이트 대신
   `photo_url`만 들어감.
 - **Docker + docker-compose** — `api` 컨테이너 + `db`(Postgres) 컨테이너.
-- **GitHub Actions** (`.github/workflows/ci.yml`) — push마다 pytest 실행 →
-  통과하면 Docker 이미지 빌드해서 `ghcr.io/<owner>/sketchbook-api`에 푸시
-  (참고용 빌드일 뿐, 운영 서버는 이미지를 쓰지 않고 소스를 직접 받아 돌림).
+- **GitHub Actions** (`.github/workflows/ci.yml`) — push·PR마다 pytest(`test` 잡) →
+  `main` push이고 통과하면 `deploy` 잡이 운영 EC2에 배포(아래). Docker 이미지 빌드
+  잡은 2026-10-28에 지움(운영 서버는 이미지를 안 쓰고 소스를 직접 받아 돌림).
 
 **운영 호스트: 직접 운영하는 EC2 한 대** (2026-10-18 Render에서 전환). 구성·
 절차·장애 기록은 `mysite-infra` 저장소(README, CUTOVER.md, TROUBLESHOOTING.md)에 있음.
@@ -72,13 +72,21 @@
   `PutObject`뿐이라 키 접두사(`records/`)를 바꾸면 업로드가 막힘. 예전 사진은
   `mysite-buckets`(시드니, 다른 계정)에 남아 있고 DB에 전체 URL로 저장돼 있어서 그대로 보임.
 - 매일 03:30 `pg_dump` → 비공개 버킷 `mysite-backups-ddonni`(14일 보관).
-- **배포는 지금 수동** (`main` push만으로는 운영에 안 올라감):
+- **배포는 자동 (2026-10-28부터)** — `main`에 push하면 운영에 올라감:
+  `deploy` 잡이 GitHub OIDC → IAM 역할(GitHub Secret `AWS_DEPLOY_ROLE_ARN`) → SSM
+  `send-command`로 서버의 `/usr/local/bin/mysite-deploy $GITHUB_SHA` 실행 →
+  `/health/db` 20초 간격 3번 확인 → 실패하면 디스코드(`DISCORD_WEBHOOK_URL`).
+  Secret은 그 밖에 `EC2_INSTANCE_ID`. 역할 신뢰 정책의 `sub`는 이름이 아니라
+  ID가 붙은 형식(`repo:ddonni@<id>/mysite-backend@<id>:...`) — mysite-infra 트러블슈팅 #15.
+- `mysite-deploy <SHA>`는 `git fetch` → `origin/main`에 있는 커밋인지 확인 →
+  `checkout --detach <SHA>` → `pip install -r requirements.txt` → `systemctl restart`.
+  그래서 **서버 코드는 detached HEAD**(`git pull` 쓰지 말 것). 손으로 배포·롤백할 때:
   ```bash
-  sudo git -C /opt/mysite-backend pull
-  sudo /opt/mysite-backend/.venv/bin/pip install -r /opt/mysite-backend/requirements.txt   # 의존성이 바뀌었을 때
-  sudo systemctl restart mysite-backend
+  sudo mysite-deploy $(git -C /opt/mysite-backend ls-remote origin refs/heads/main | cut -f1)   # 최신 main
+  sudo mysite-deploy <이전 커밋 SHA 40자리>                                                     # 롤백
   sudo journalctl -u mysite-backend -n 10 --no-pager    # "Application startup complete"
   ```
+  재시작하는 몇 초 동안은 Nginx가 502를 냄(infra #14).
   새 마이그레이션은 재시작할 때 자동 적용됨. 서버 코드가 DB보다 오래되면(DB에 모르는
   리비전이 있으면) 앱이 무한 재시작하니, 코드를 먼저 최신으로 맞출 것.
 - 운영에서 겪고 고친 것: `alembic/env.py`의 `fileConfig`가 uvicorn 로그를 꺼 버리던 문제

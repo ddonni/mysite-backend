@@ -30,8 +30,8 @@
 - **S3(boto3)** — 기록 보관소 사진 저장소. `POST /api/rooms/{code}/uploads`가 파일을
   받아 S3에 올리고 URL을 돌려줌.
 - **Docker + docker-compose** — API 컨테이너와 PostgreSQL 컨테이너를 한 번에 실행.
-- **GitHub Actions** — 푸시할 때마다 테스트 실행 → 통과하면 Docker 이미지를
-  빌드해서 GitHub Container Registry(ghcr.io)에 푸시.
+- **GitHub Actions** — 푸시·PR마다 테스트 실행 → `main`에 push됐고 통과하면
+  운영 서버(EC2)에 자동 배포(아래 "배포").
 
 ## 로컬 실행
 
@@ -60,8 +60,11 @@ docker compose up --build
 - 앱은 systemd 서비스로, 로그인할 수 없는 전용 계정으로 실행함. 죽으면 자동으로 다시 뜸.
 - 환경 변수는 서버의 root 전용 파일(600)에 있음. AWS 키는 쓰지 않고 EC2 역할로 S3에 접근함.
 - DB는 매일 S3로 백업하고, 복원 훈련까지 해 봄.
-- 배포는 지금 수동임: 서버에서 `git pull` → (의존성이 바뀌었으면 `pip install`) →
-  `systemctl restart`. GitHub Actions로 자동화하는 건 다음 단계.
+- **배포는 자동**(2026-10-28부터): `main`에 push → 테스트 통과 → GitHub OIDC로 AWS 역할을
+  빌림(저장된 AWS 키 없음) → SSM으로 서버의 배포 스크립트 실행(SSH 없음) →
+  `/health/db` 확인. 테스트를 통과한 **바로 그 커밋**만 배포하고, 실패하면 디스코드로 알림이 옴.
+- 손으로 배포하거나 이전 버전으로 되돌릴 때도 같은 스크립트를 씀:
+  `sudo mysite-deploy <커밋 SHA 40자리>`. 롤백 방법은 mysite-infra README "롤백·복구 방법".
 
 Render 서비스와 Neon DB는 병행 운영을 마치고 2026-10-25에 삭제함(`render.yaml`도 지움).
 
