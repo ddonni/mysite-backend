@@ -83,6 +83,10 @@ def _album(browse_id: str) -> dict:
     return _client(None).get_album(browse_id)
 
 
+def _artist_albums(browse_id: str, params: str) -> list:
+    return _client(None).get_artist_albums(browse_id, params)
+
+
 ITUNES_URL = "https://itunes.apple.com/search"
 # 애플이 밝힌 한도(IP당 분당 약 20번)보다 조금 아래로 — 넘기면 한동안 403으로 막힘.
 ITUNES_PER_MINUTE = 18
@@ -285,6 +289,23 @@ def _releases(page: dict):
                 yield kind, r
 
 
+def _all_releases(page: dict):
+    """_releases와 같지만 가수 페이지에 다 안 실린 앨범·싱글까지 — 페이지엔 종류마다 10개까지만
+    오고(닐로의 "넋두리"는 싱글 16개 중 14번째라 빠졌음, 2026-11-03), 나머지는 "더보기"
+    (get_artist_albums)로 따로 받아야 함. 더보기가 실패하면 페이지에 온 것만."""
+    for section, kind in (("albums", "앨범"), ("singles", "싱글")):
+        data = page.get(section) or {}
+        items = data.get("results") or []
+        if data.get("browseId") and data.get("params"):
+            try:
+                items = _artist_albums(data["browseId"], data["params"]) or items
+            except Exception:
+                pass
+        for r in items:
+            if r.get("title"):
+                yield kind, r
+
+
 def search_artist(query: str) -> List[dict]:
     """가수 이름으로 찾기(가수 칸) — 일반 검색은 앨범을 3개까지만 줘서, 그 가수의
     페이지(get_artist)에서 앨범·싱글 목록을 가져옴(앨범 먼저). 가수를 못 찾거나 가수
@@ -309,7 +330,8 @@ def search_artist(query: str) -> List[dict]:
 
 # 가수의 노래 목록에서 수록곡을 받아 올 앨범·싱글 수와 돌려줄 노래 수. 앨범 하나에 유튜브
 # 요청이 하나씩 더 나가서(get_album) 묶음 수를 정해 둠 — 결과는 검색 캐시(10분)에 남음.
-SONGS_RELEASES = 12
+# 싱글을 많이 낸 가수가 흔해서(닐로 16개) 넉넉히.
+SONGS_RELEASES = 30
 SONGS_MAX_RESULTS = 150
 SONGS_WORKERS = 4
 
@@ -318,14 +340,14 @@ def search_artist_songs(query: str) -> List[dict]:
     """가수 이름으로 그 가수의 노래 목록 — "여러 개 추가"의 검색해서 고르기에서 들은 노래만
     체크하게. 앨범 이름은 모르고 노래만 아는 경우가 많아서 앨범이 아니라 노래로 돌려줌
     (song에 노래 제목, album은 어느 앨범인지 구분용). 로그인 없이는 가수 페이지의 인기곡
-    목록이 비어 와서(2026-10-29 확인), 앨범·싱글마다 수록곡(get_album)을 받아 모음 — 앨범
-    먼저, 같은 노래(싱글로 먼저 나온 곡 등)는 처음 것만. 가수를 못 찾으면 빈 목록,
+    목록이 비어 와서(2026-10-29 확인), 앨범·싱글마다 수록곡(get_album)을 받아 모음 — 페이지에
+    안 실린 것까지(_all_releases), 앨범 먼저, 같은 노래(싱글로 먼저 나온 곡 등)는 처음 것만. 가수를 못 찾으면 빈 목록,
     앨범 하나가 실패하면 그 앨범만 뺌."""
     _, page = _artist_page(query)
     if not page:
         return []
     name = page.get("name") or ""
-    releases = [(kind, r) for kind, r in _releases(page) if r.get("browseId")][:SONGS_RELEASES]
+    releases = [(kind, r) for kind, r in _all_releases(page) if r.get("browseId")][:SONGS_RELEASES]
 
     def tracks(item):
         try:

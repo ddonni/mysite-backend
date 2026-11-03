@@ -1555,6 +1555,36 @@ def test_music_search_songs_lists_the_artists_songs_with_their_album(monkeypatch
                        "year": "2017", "cover": "https://yt3.googleusercontent.com/tb"}
 
 
+def test_music_search_songs_includes_releases_beyond_the_artist_page(monkeypatch):
+    # 가수 페이지엔 싱글이 10개까지만 와서, 더보기(get_artist_albums)로 나머지까지 받음
+    _artist_with_releases(monkeypatch, albums=[], singles=[{"title": "이별 편지", "browseId": "S1"}],
+                          tracklists={"S1": ["이별 편지"], "S9": ["넋두리"]})
+    monkeypatch.setattr("app.music_search._artist", lambda ch: {
+        "name": "닐로",
+        "singles": {"results": [{"title": "이별 편지", "browseId": "S1"}], "browseId": "MPAD_x", "params": "p"},
+    })
+    asked = []
+    monkeypatch.setattr("app.music_search._artist_albums", lambda b, p: asked.append((b, p)) or [
+        {"title": "이별 편지", "browseId": "S1"}, {"title": "넋두리", "browseId": "S9"},
+    ])
+    body = client.get("/api/search/music", params={"q": "닐로", "by": "songs"}).json()
+    assert asked == [("MPAD_x", "p")]
+    assert [s["song"] for s in body] == ["이별 편지", "넋두리"]
+
+
+def test_music_search_songs_falls_back_to_the_page_when_more_fails(monkeypatch):
+    _artist_with_releases(monkeypatch, albums=[], singles=[], tracklists={"S1": ["이별 편지"]})
+    monkeypatch.setattr("app.music_search._artist", lambda ch: {
+        "name": "닐로", "singles": {"results": [{"title": "이별 편지", "browseId": "S1"}], "browseId": "MPAD_x", "params": "p"},
+    })
+
+    def broken(b, p):
+        raise Exception("more failed")
+    monkeypatch.setattr("app.music_search._artist_albums", broken)
+    body = client.get("/api/search/music", params={"q": "닐로", "by": "songs"}).json()
+    assert [s["song"] for s in body] == ["이별 편지"]
+
+
 def test_music_search_songs_is_empty_when_the_artist_is_not_found(monkeypatch):
     monkeypatch.setattr("app.music_search._search", lambda q, auth: [])
     resp = client.get("/api/search/music", params={"q": "없는가수", "by": "songs"})
