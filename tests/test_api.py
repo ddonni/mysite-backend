@@ -1069,6 +1069,15 @@ YTM_RESULTS = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def no_itunes(monkeypatch):
+    """음악 검색의 iTunes 노래 찾기(music_search._song_album)가 테스트 중 진짜 애플에
+    나가지 않게 — 기본은 "노래 못 찾음". 노래 찾기를 보는 테스트는 _itunes를 다시 바꿈."""
+    from app import music_search
+    monkeypatch.setattr("app.music_search._itunes", lambda q: [])
+    music_search._itunes_calls.clear()
+
+
 @pytest.fixture
 def ytm(monkeypatch):
     """유튜브 대신 받은 (query, auth_file)을 기록하고 YTM_RESULTS를 돌려줌."""
@@ -1357,3 +1366,146 @@ def test_cache_expires_and_drops_oldest(monkeypatch):
     get("b"); get("c")  # 최대 2개 — 가장 오래된 a가 빠짐
     get("a")
     assert n == ["a", "a", "b", "c", "a"]
+
+
+# --- music search: 노래 제목 → iTunes로 실린 앨범 찾기 ---
+
+ITUNES_SONG = {"trackName": "Who Do You Love", "artistName": "The Black Skirts",
+               "collectionName": "TEAM BABY", "releaseDate": "2017-03-14T12:00:00Z",
+               "artworkUrl100": "https://is1-ssl.mzstatic.com/a/100x100bb.jpg"}
+
+
+def _ytm_by_query(monkeypatch, answers):
+    """검색어마다 다른 유튜브 결과를 돌려줌(answers에 없으면 빈 결과)."""
+    calls = []
+
+    def fake_search(query, auth_file):
+        calls.append(query)
+        return answers.get(query, [])
+    monkeypatch.setattr("app.music_search._search", fake_search)
+    return calls
+
+
+def test_music_search_puts_the_songs_album_first_with_korean_names(monkeypatch):
+    monkeypatch.setattr("app.music_search._itunes", lambda q: [ITUNES_SONG])
+    calls = _ytm_by_query(monkeypatch, {
+        "나랑 아니면": [{"resultType": "album", "title": "Good Music For Dating", "artists": [{"name": "Music For U"}]}],
+        "The Black Skirts TEAM BABY": [
+            {"resultType": "album", "title": "TEAM BABY", "type": "앨범", "artists": [{"name": "검정치마"}],
+             "thumbnails": [{"url": "https://yt3.googleusercontent.com/tb"}]},
+        ],
+    })
+    resp = client.get("/api/search/music", params={"q": "나랑 아니면"})
+    assert resp.status_code == 200
+    assert calls == ["나랑 아니면", "The Black Skirts TEAM BABY"]
+    first, second = resp.json()
+    # 앨범·가수는 유튜브의 한국어 이름, 연도는 iTunes에서. song은 비움(제목은 쓴 그대로 두는 규칙).
+    assert first == {"album": "TEAM BABY", "song": None, "creator": "검정치마", "kind": "앨범",
+                     "year": "2017", "cover": "https://yt3.googleusercontent.com/tb"}
+    assert second["album"] == "Good Music For Dating"
+
+
+def test_music_search_matches_a_translated_album_by_artist(monkeypatch):
+    # iTunes는 "Origin - EP", 유튜브는 "원래" — 앨범 이름은 달라도 가수가 같으면 그것. 이름이
+    # 일부만 겹치는 남의 앨범("Sex Education Original Soundtrack")은 안 걸림.
+    monkeypatch.setattr("app.music_search._itunes", lambda q: [dict(
+        ITUNES_SONG, artistName="Layone", collectionName="Origin - EP")])
+    _ytm_by_query(monkeypatch, {"Layone Origin": [
+        {"resultType": "album", "title": "Sex Education Original Soundtrack", "artists": [{"name": "Ezra Furman"}]},
+        {"resultType": "album", "title": "원래", "artists": [{"name": "래원 (Layone)"}], "thumbnails": []},
+    ]})
+    (first,) = client.get("/api/search/music", params={"q": "뉴질랜드"}).json()
+    assert (first["album"], first["creator"]) == ("원래", "래원 (Layone)")
+
+
+def test_music_search_prefers_the_same_artist_over_a_same_named_album(monkeypatch):
+    # "밤편지" → iTunes "Through the Night - Single"(IU). 유튜브엔 다른 가수의 같은 이름 싱글도
+    # 있지만, 아이유의 "밤편지" 싱글을 고름.
+    monkeypatch.setattr("app.music_search._itunes", lambda q: [dict(
+        ITUNES_SONG, artistName="IU", collectionName="Through the Night - Single")])
+    _ytm_by_query(monkeypatch, {"IU Through the Night": [
+        {"resultType": "album", "title": "Through the Night", "artists": [{"name": "Iviguk"}]},
+        {"resultType": "album", "title": "밤편지", "type": "싱글", "artists": [{"name": "아이유(IU)"}]},
+    ]})
+    (first,) = client.get("/api/search/music", params={"q": "밤편지"}).json()
+    assert (first["album"], first["creator"]) == ("밤편지", "아이유(IU)")
+
+
+def test_music_search_falls_back_to_itunes_names_when_youtube_has_no_such_album(monkeypatch):
+    monkeypatch.setattr("app.music_search._itunes", lambda q: [dict(
+        ITUNES_SONG, collectionName="Who Do You Love - Single")])
+    _ytm_by_query(monkeypatch, {"The Black Skirts Who Do You Love": [
+        {"resultType": "album", "title": "다른 앨범", "artists": [{"name": "다른 가수"}]},
+    ]})
+    (first,) = client.get("/api/search/music", params={"q": "나랑 아니면"}).json()
+    assert first == {"album": "Who Do You Love", "song": None, "creator": "The Black Skirts", "kind": "싱글",
+                     "year": "2017", "cover": "https://is1-ssl.mzstatic.com/a/600x600bb.jpg"}
+
+
+def test_music_search_keeps_youtube_results_when_itunes_fails(monkeypatch, ytm):
+    def boom(q):
+        raise Exception("403 Forbidden")
+    monkeypatch.setattr("app.music_search._itunes", boom)
+    resp = client.get("/api/search/music", params={"q": "꽃갈피"})
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
+
+
+def test_music_search_stops_asking_itunes_over_its_per_minute_cap(monkeypatch, ytm):
+    from app import music_search
+    asked = []
+    monkeypatch.setattr("app.music_search._itunes", lambda q: asked.append(q) or [])
+    for i in range(music_search.ITUNES_PER_MINUTE + 3):
+        assert client.get("/api/search/music", params={"q": f"노래{i}"}).status_code == 200
+    assert len(asked) == music_search.ITUNES_PER_MINUTE
+
+
+def test_music_search_by_artist_does_not_ask_itunes(monkeypatch):
+    asked = []
+    monkeypatch.setattr("app.music_search._itunes", lambda q: asked.append(q) or [])
+    monkeypatch.setattr("app.music_search._search", lambda q, auth: [])
+    client.get("/api/search/music", params={"q": "검정치마", "by": "artist"})
+    assert asked == []
+
+
+# --- music search by=songs: 가수의 노래 목록(수록곡을 모은 것) ---
+
+def _artist_with_releases(monkeypatch, albums, singles, tracklists):
+    monkeypatch.setattr("app.music_search._search", lambda q, auth: [
+        {"resultType": "album", "title": "TEAM BABY", "artists": [{"name": "검정치마", "id": "UC_bs"}]},
+    ])
+    monkeypatch.setattr("app.music_search._artist", lambda ch: {
+        "name": "검정치마",
+        "albums": {"results": albums},
+        "singles": {"results": singles},
+    })
+
+    def fake_album(browse_id):
+        if browse_id not in tracklists:
+            raise Exception("album failed")
+        return {"tracks": [{"title": t} for t in tracklists[browse_id]]}
+    monkeypatch.setattr("app.music_search._album", fake_album)
+
+
+def test_music_search_songs_lists_the_artists_songs_with_their_album(monkeypatch):
+    _artist_with_releases(
+        monkeypatch,
+        albums=[{"title": "TEAM BABY", "browseId": "A1", "year": "2017", "thumbnails": [{"url": "https://yt3.googleusercontent.com/tb"}]}],
+        singles=[{"title": "나랑 아니면", "browseId": "S1", "year": "2016", "thumbnails": []},
+                 {"title": "깨진 앨범", "browseId": "S2"}],
+        tracklists={"A1": ["Ling Ling", "나랑 아니면", "폭죽과 별"], "S1": ["나랑 아니면 "]},  # S2는 실패
+    )
+    resp = client.get("/api/search/music", params={"q": "검정치마", "by": "songs"})
+    assert resp.status_code == 200
+    body = resp.json()
+    # 앨범 먼저, 싱글로 또 나온 같은 노래는 한 번만, 실패한 앨범은 빼고
+    assert [s["song"] for s in body] == ["Ling Ling", "나랑 아니면", "폭죽과 별"]
+    assert body[0] == {"album": "TEAM BABY", "song": "Ling Ling", "creator": "검정치마", "kind": "노래",
+                       "year": "2017", "cover": "https://yt3.googleusercontent.com/tb"}
+
+
+def test_music_search_songs_is_empty_when_the_artist_is_not_found(monkeypatch):
+    monkeypatch.setattr("app.music_search._search", lambda q, auth: [])
+    resp = client.get("/api/search/music", params={"q": "없는가수", "by": "songs"})
+    assert resp.status_code == 200
+    assert resp.json() == []
