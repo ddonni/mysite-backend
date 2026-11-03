@@ -1138,12 +1138,10 @@ TMDB_MULTI = {"results": [
     {"media_type": "person", "id": 5, "name": "진격"},
     {"media_type": "movie", "id": 4935, "title": "하울의 움직이는 성", "original_title": "ハウルの動く城",
      "release_date": "2004-11-19", "genre_ids": [14, 16], "poster_path": None},
-]}
-TMDB_MOVIE = {"results": [
-    {"id": 157336, "title": "인터스텔라", "original_title": "Interstellar", "release_date": "2014-11-05",
-     "poster_path": "/gD.jpg"},
-    {"id": 496243, "title": "기생충", "original_title": "기생충", "release_date": "2019-05-30",
-     "poster_path": "/jj.jpg"},
+    {"media_type": "tv", "id": 66732, "name": "기묘한 이야기", "original_name": "Stranger Things",
+     "first_air_date": "2016-07-15", "genre_ids": [18, 10765], "poster_path": "/st.jpg"},  # 드라마
+    {"media_type": "movie", "id": 496243, "title": "기생충", "original_title": "기생충",
+     "release_date": "2019-05-30", "genre_ids": [35, 53, 18], "poster_path": "/jj.jpg"},
 ]}
 
 
@@ -1154,7 +1152,6 @@ def tmdb(monkeypatch):
     calls = []
     responses = {
         "/search/multi": TMDB_MULTI,
-        "/search/movie": TMDB_MOVIE,
         "/movie/496243/credits": {"crew": [
             {"job": "Producer", "name": "곽신애"}, {"job": "Director", "name": "봉준호"}]},
         "/tv/1429/aggregate_credits": {"crew": [
@@ -1171,6 +1168,7 @@ def tmdb(monkeypatch):
             {"media_type": "movie", "id": 7, "title": "실사 다큐", "job": "Director", "genre_ids": [99], "vote_count": 50},
             {"media_type": "tv", "id": 8, "name": "미래소년 코난", "job": "Director", "genre_ids": [16], "vote_count": 400},
             {"media_type": "tv", "id": 8, "name": "미래소년 코난", "job": "Director", "genre_ids": [16], "vote_count": 400},
+            {"media_type": "tv", "id": 9, "name": "실사 드라마", "job": "Director", "genre_ids": [18], "vote_count": 100},
         ]},
         "/tv/2/aggregate_credits": {"crew": [
             {"name": "각본가", "jobs": [{"job": "Writer"}]},
@@ -1184,17 +1182,22 @@ def tmdb(monkeypatch):
     return calls
 
 
-def test_screen_search_movie(tmdb):
-    resp = client.get("/api/search/screen", params={"q": " 인터스텔라 ", "kind": "movie"})
+def test_screen_search_movie_tab_keeps_movies_and_dramas(tmdb):
+    resp = client.get("/api/search/screen", params={"q": " 진격 ", "kind": "movie"})
     assert resp.status_code == 200
-    assert tmdb[0][:1] == ("/search/movie",) and tmdb[0][1]["query"] == "인터스텔라" and tmdb[0][2] == "test-token"
-    assert resp.json() == [
-        {"id": 157336, "media": "movie", "title": "인터스텔라", "original_title": "Interstellar", "year": "2014",
-         "cover": "https://image.tmdb.org/t/p/w342/gD.jpg", "creator": ""},
-        # 원제가 한국어 제목과 같으면 비워 둠(목록에 같은 말을 두 번 안 씀)
-        {"id": 496243, "media": "movie", "title": "기생충", "original_title": "", "year": "2019",
-         "cover": "https://image.tmdb.org/t/p/w342/jj.jpg", "creator": ""},
+    assert tmdb[0][:1] == ("/search/multi",) and tmdb[0][1]["query"] == "진격" and tmdb[0][2] == "test-token"
+    # 영화는 애니 극장판까지 전부, TV는 드라마만(애니 TV 시리즈는 애니 탭 몫), 사람은 뺌
+    assert [(r["media"], r["title"]) for r in resp.json()] == [
+        ("movie", "진격의 거인 실사판"),
+        ("movie", "하울의 움직이는 성"),
+        ("tv", "기묘한 이야기"),
+        ("movie", "기생충"),
     ]
+    drama, parasite = resp.json()[2], resp.json()[3]
+    assert drama == {"id": 66732, "media": "tv", "title": "기묘한 이야기", "original_title": "Stranger Things",
+                     "year": "2016", "cover": "https://image.tmdb.org/t/p/w342/st.jpg", "creator": ""}
+    # 원제가 한국어 제목과 같으면 비워 둠(목록에 같은 말을 두 번 안 씀)
+    assert parasite["original_title"] == ""
 
 
 def test_screen_search_anime_keeps_animation_movies_and_tv_only(tmdb):
@@ -1256,9 +1259,10 @@ def test_screen_search_by_director_lists_their_works_most_known_first(tmdb):
     ]
 
 
-def test_screen_search_by_director_movie_tab_keeps_movies_only(tmdb):
+def test_screen_search_by_director_movie_tab_keeps_movies_and_dramas(tmdb):
     resp = client.get("/api/search/screen", params={"q": "미야자키", "kind": "movie", "by": "director"})
-    assert [r["title"] for r in resp.json()] == ["센과 치히로의 행방불명", "실사 다큐", "단편"]
+    # 애니 TV(미래소년 코난)는 빠지고 실사 드라마는 들어옴
+    assert [r["title"] for r in resp.json()] == ["센과 치히로의 행방불명", "실사 드라마", "실사 다큐", "단편"]
 
 
 def test_screen_search_by_director_no_director_found_is_empty(tmdb, monkeypatch):

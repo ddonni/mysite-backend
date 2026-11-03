@@ -72,6 +72,20 @@ def _to_item(r: dict, media: str, creator: str = "") -> dict:
 _DIRECTOR_JOBS = ("Director", "Series Director", "Chief Director")
 
 
+def _fits(kind: str, media: Optional[str], r: dict) -> bool:
+    """이 영화·TV가 그 탭의 검색 결과에 들어갈지.
+    kind="movie"(영화 탭): 영화 전체(애니 극장판도 영화로 기록하는 사람이 있어서 안 거름) +
+      드라마·시리즈 같은 TV(2026-11-03부터 — 영화 탭에 드라마도 기록하고 싶다는 요청).
+      애니 TV 시리즈는 애니 탭 몫이라 뺌.
+    kind="anime"(애니 탭): 영화·TV 중 애니메이션 장르만."""
+    if media not in ("movie", "tv"):
+        return False
+    is_anime = ANIMATION_GENRE in (r.get("genre_ids") or [])
+    if kind == "anime":
+        return is_anime
+    return media == "movie" or not is_anime
+
+
 def search_by_director(query: str, kind: str) -> List[dict]:
     """감독 이름으로 찾기(만든 사람 칸) — 사람 검색에서 연출이 주 분야인 첫 사람
     ("미야자키" → 미야자키 하야오, 인기순)의 연출작. 날짜순이면 단편·특별편이
@@ -88,10 +102,7 @@ def search_by_director(query: str, kind: str) -> List[dict]:
         media = w.get("media_type")
         if w.get("job") not in _DIRECTOR_JOBS or media not in ("movie", "tv"):
             continue
-        is_anime = ANIMATION_GENRE in (w.get("genre_ids") or [])
-        if kind == "anime" and not is_anime:
-            continue
-        if kind == "movie" and media != "movie":
+        if not _fits(kind, media, w):
             continue
         key = (media, w.get("id"))
         if key in seen:  # TV는 회차마다 같은 작품이 여러 번 나옴
@@ -104,19 +115,10 @@ def search_by_director(query: str, kind: str) -> List[dict]:
 
 
 def search_screen(query: str, kind: str) -> List[dict]:
-    """kind="movie": 영화 전체(애니 극장판도 영화로 기록하는 사람이 있어서 안 거름).
-    kind="anime": 영화·TV를 한꺼번에 찾아 애니메이션 장르만 남김."""
+    """영화·TV를 한꺼번에 찾아(search/multi) 탭에 맞는 것만 남김(_fits)."""
     params = {"query": query, "include_adult": "false"}
-    if kind == "movie":
-        results = _get("/search/movie", params).get("results", [])
-        items = [_to_item(r, "movie") for r in results]
-    else:
-        results = _get("/search/multi", params).get("results", [])
-        items = [
-            _to_item(r, r["media_type"])
-            for r in results
-            if r.get("media_type") in ("movie", "tv") and ANIMATION_GENRE in (r.get("genre_ids") or [])
-        ]
+    results = _get("/search/multi", params).get("results", [])
+    items = [_to_item(r, r["media_type"]) for r in results if _fits(kind, r.get("media_type"), r)]
     return [i for i in items if i["title"] and i["id"] is not None][:MAX_RESULTS]
 
 
