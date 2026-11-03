@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import Annotated, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints
 
 
 class RoomOut(BaseModel):
@@ -220,3 +221,16 @@ class FeedbackIn(BaseModel):
     name: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=30)]] = None
     page: Optional[Annotated[str, StringConstraints(max_length=200)]] = None
     room_code: Optional[Annotated[str, StringConstraints(max_length=10)]] = None
+
+
+class FeedbackOut(BaseModel):
+    """GET /api/admin/feedback의 한 건 — 운영자 피드백 페이지(admin.html)용."""
+
+    id: int
+    message: str
+    name: Optional[str] = None
+    page: Optional[str] = None
+    room_code: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}

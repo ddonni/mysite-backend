@@ -170,12 +170,42 @@ def create_room(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/feedback")
 def send_feedback(body: schemas.FeedbackIn, request: Request, db: Session = Depends(get_db)):
-    """모든 페이지의 "의견 보내기" — 저장만 하고 돌려주는 건 없음. 읽는 API는
-    일부러 안 만듦(운영자가 서버에서 psql로 봄)."""
+    """모든 페이지의 "의견 보내기" — 저장만 하고 돌려주는 건 없음. 읽는 건
+    운영자만(아래 /api/admin/feedback)."""
     check_rate_limit(request, _feedback_posts, FEEDBACK_LIMIT, FEEDBACK_WINDOW,
                       "too many feedback, try again later")
     crud.create_feedback(db, body.model_dump())
     return {"ok": True}
+
+
+# 운영자 피드백 페이지(프론트 admin.html)가 한 번에 받는 개수 — 지금까지 받은 걸
+# 다 합쳐도 이보다 훨씬 적음. 넘으면 오래된 건 psql로.
+ADMIN_FEEDBACK_LIMIT = 500
+
+
+def require_admin(authorization: Optional[str] = Header(None)) -> str:
+    """운영자만 — "Bearer <구글 ID 토큰>"을 받아, 구글이 확인한 이메일이
+    ADMIN_EMAILS(쉼표로 여러 개, 서버 환경 변수에만 둠)에 있어야 통과.
+    ADMIN_EMAILS가 비어 있으면 아무도 못 들어옴. 방 복구용 구글 로그인과 같은
+    client id라 토큰 검증도 같은 google_auth를 씀."""
+    admins = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="sign in required")
+    try:
+        claims = google_auth.verify_id_token(token)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="invalid google token")
+    email = (claims.get("email") or "").lower()
+    if not claims.get("email_verified") or email not in admins:
+        raise HTTPException(status_code=403, detail="not an admin")
+    return email
+
+
+@app.get("/api/admin/feedback", response_model=List[schemas.FeedbackOut])
+def admin_list_feedback(_: str = Depends(require_admin), db: Session = Depends(get_db)):
+    """받은 의견 목록(최근 것부터) — 운영자 피드백 페이지용."""
+    return crud.list_feedback(db, ADMIN_FEEDBACK_LIMIT)
 
 
 @app.get("/api/rooms", response_model=List[schemas.PublicRoomOut])

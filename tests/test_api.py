@@ -912,6 +912,57 @@ def test_feedback_is_rate_limited_per_ip():
     assert client.post("/api/rooms").status_code == 200
 
 
+# --- 운영자 피드백 페이지 (GET /api/admin/feedback) ---
+
+ADMIN = {"Authorization": "Bearer google-id-token"}
+
+
+@pytest.fixture
+def admin_google(monkeypatch):
+    """ADMIN_EMAILS에 boss@example.com, 구글 토큰은 claims로 바꿔 끼울 수 있게."""
+    monkeypatch.setenv("ADMIN_EMAILS", " Boss@example.com , other@example.com")
+    claims = {"sub": "admin-1", "email": "boss@example.com", "email_verified": True}
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: claims)
+    return claims
+
+
+def test_admin_feedback_lists_newest_first(admin_google):
+    client.post("/api/feedback", json={"message": "첫 번째", "name": "민기", "page": "/mysite/library", "room_code": "TTHB8N"})
+    client.post("/api/feedback", json={"message": "두 번째"})
+    resp = client.get("/api/admin/feedback", headers=ADMIN)
+    assert resp.status_code == 200
+    first, second = resp.json()
+    assert second["message"] == "첫 번째"
+    assert (second["name"], second["page"], second["room_code"]) == ("민기", "/mysite/library", "TTHB8N")
+    assert first["message"] == "두 번째" and first["name"] is None
+    assert second["created_at"]
+
+
+def test_admin_feedback_needs_a_google_token(admin_google):
+    assert client.get("/api/admin/feedback").status_code == 401
+    assert client.get("/api/admin/feedback", headers={"Authorization": "Basic abc"}).status_code == 401
+
+
+def test_admin_feedback_rejects_invalid_token(admin_google, monkeypatch):
+    def bad(t):
+        raise ValueError("bad")
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", bad)
+    assert client.get("/api/admin/feedback", headers=ADMIN).status_code == 401
+
+
+def test_admin_feedback_rejects_other_or_unverified_email(admin_google):
+    admin_google["email"] = "someone@example.com"
+    assert client.get("/api/admin/feedback", headers=ADMIN).status_code == 403
+    admin_google["email"] = "boss@example.com"
+    admin_google["email_verified"] = False
+    assert client.get("/api/admin/feedback", headers=ADMIN).status_code == 403
+
+
+def test_admin_feedback_closed_when_admin_emails_unset(admin_google, monkeypatch):
+    monkeypatch.delenv("ADMIN_EMAILS")
+    assert client.get("/api/admin/feedback", headers=ADMIN).status_code == 403
+
+
 # --- book search (GET /api/search/book) + cover relay (GET /api/cover) ---
 
 KAKAO_DEMIAN = {

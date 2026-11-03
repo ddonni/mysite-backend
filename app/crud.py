@@ -381,3 +381,13 @@ def create_feedback(db: Session, data: dict) -> models.Feedback:
     db.commit()
     db.refresh(feedback)
     return feedback
+
+
+def list_feedback(db: Session, limit: int) -> List[models.Feedback]:
+    """최근 것부터 — 같은 시각이면 나중에 들어온 것(id가 큰 것)이 위."""
+    return (
+        db.query(models.Feedback)
+        .order_by(models.Feedback.created_at.desc(), models.Feedback.id.desc())
+        .limit(limit)
+        .all()
+    )

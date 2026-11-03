@@ -78,7 +78,7 @@ class Record(Base):
 class Feedback(Base):
     """사이트 어디서나 "의견 보내기"로 받은 피드백 한 건. 방과 달리 누구나
     (토큰 없이) 보낼 수 있고, 로그인이 없으니 누가 보냈는지는 본인이 적은
-    이름(선택)뿐. 읽는 API는 일부러 없음 — 운영자가 서버에서 psql로 봄.
+    이름(선택)뿐. 읽는 건 운영자만(GET /api/admin/feedback, 구글 로그인).
     page/room_code는 보낸 사람이 어느 화면·어느 방을 보다가 썼는지(맥락용)."""
 
     __tablename__ = "feedback"
