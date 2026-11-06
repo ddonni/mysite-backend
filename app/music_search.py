@@ -202,6 +202,31 @@ def _cover(result: dict) -> Optional[str]:
     return thumbs[-1].get("url") if thumbs else None
 
 
+def listen_url(playlist_id: Optional[str], index: int) -> Optional[str]:
+    """앨범 재생목록의 index번째(1부터) 곡을 가리키는 유튜브 주소. 로그인 없이는 유튜브
+    뮤직이 노래마다의 영상 번호를 안 주고(videoId가 비어 옴, 2026-11-05 확인) 앨범 재생목록
+    번호(audioPlaylistId, OLAK5uy_…)만 줘서 — 재생목록은 임베드로 틀 수 있음(oEmbed 확인).
+    프론트(js/shared/youtube.js)가 이 주소를 그 곡부터 틀고 한 곡에서 멈춤."""
+    if not playlist_id:
+        return None
+    return f"https://www.youtube.com/playlist?list={playlist_id}&index={index}"
+
+
+def album_listen(album_id: str, song: str) -> Optional[str]:
+    """앨범(유튜브 뮤직 browseId)에서 제목이 song인 곡의 주소 — 검색 결과(앨범 줄)에서 노래를
+    고를 때. 못 찾으면 None(곡이 하나뿐인 싱글이면 그 곡)."""
+    try:
+        album = _album(album_id)
+    except Exception:
+        return None
+    tracks = album.get("tracks") or []
+    key = _squash(song)
+    index = next((i for i, t in enumerate(tracks, 1) if key and _squash(t.get("title")) == key), None)
+    if index is None and len(tracks) == 1:
+        index = 1
+    return listen_url(album.get("audioPlaylistId"), index) if index else None
+
+
 def _to_item(r: dict) -> Optional[dict]:
     artists = ", ".join(a.get("name", "") for a in r.get("artists") or [] if a.get("name"))
     if r.get("resultType") == "album":
@@ -212,6 +237,7 @@ def _to_item(r: dict) -> Optional[dict]:
             "kind": r.get("type") or "",
             "year": str(r.get("year") or ""),
             "cover": _cover(r),
+            "album_id": r.get("browseId"),
         }
     if r.get("resultType") == "song":
         return {
@@ -349,17 +375,17 @@ def search_artist_songs(query: str) -> List[dict]:
     name = page.get("name") or ""
     releases = [(kind, r) for kind, r in _all_releases(page) if r.get("browseId")][:SONGS_RELEASES]
 
-    def tracks(item):
+    def album_of(item):
         try:
-            return (_album(item[1]["browseId"]).get("tracks") or [])
+            return _album(item[1]["browseId"]) or {}
         except Exception:
-            return []
+            return {}
     with ThreadPoolExecutor(max_workers=SONGS_WORKERS) as pool:
-        tracklists = list(pool.map(tracks, releases))
+        albums = list(pool.map(album_of, releases))
 
     out, seen = [], set()
-    for (kind, r), tracks_of in zip(releases, tracklists):
-        for t in tracks_of:
+    for (kind, r), album in zip(releases, albums):
+        for i, t in enumerate(album.get("tracks") or [], 1):
             key = _squash(t.get("title"))
             if not key or key in seen:
                 continue
@@ -371,5 +397,7 @@ def search_artist_songs(query: str) -> List[dict]:
                 "kind": "노래",
                 "year": str(r.get("year") or ""),
                 "cover": _cover(r),
+                "listen": listen_url(album.get("audioPlaylistId"), i),
+                "album_id": r["browseId"],
             })
     return out[:SONGS_MAX_RESULTS]

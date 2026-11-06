@@ -1,7 +1,10 @@
+import re
 from datetime import datetime
 from typing import Annotated, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, StringConstraints
+from urllib.parse import parse_qs, urlparse
+
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 
 class RoomOut(BaseModel):
@@ -106,6 +109,14 @@ class MusicResult(BaseModel):
     kind: str
     year: str
     cover: Optional[str] = None
+    # 틀 수 있는 유튜브 주소 — 노래 목록(by=songs)엔 바로 들어 있고, 앨범 결과엔 없는 대신
+    # album_id(유튜브 뮤직 앨범 id)가 있어 고른 것만 /api/search/music/listen으로 물어봄.
+    listen: Optional[str] = None
+    album_id: Optional[str] = None
+
+
+class MusicListenOut(BaseModel):
+    listen: Optional[str] = None
 
 
 class ScreenResult(BaseModel):
@@ -172,6 +183,30 @@ class DeleteOut(BaseModel):
     count: int
 
 
+LISTEN_URL_MAX = 300
+_YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}
+_YOUTUBE_ID = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+
+
+def is_youtube_url(url: str) -> bool:
+    """https 유튜브 주소이고 영상(v=, youtu.be/…) 또는 재생목록(list=) 번호가 있는지."""
+    try:
+        u = urlparse(url)
+    except ValueError:
+        return False
+    if u.scheme != "https":
+        return False
+    qs = parse_qs(u.query)
+    ids = []
+    if u.hostname == "youtu.be":
+        ids.append(u.path.lstrip("/"))
+    elif u.hostname in _YOUTUBE_HOSTS:
+        ids += qs.get("v", []) + qs.get("list", [])
+        if u.path.startswith("/shorts/"):
+            ids.append(u.path[len("/shorts/"):])
+    return any(_YOUTUBE_ID.match(i or "") for i in ids)
+
+
 class RecordIn(BaseModel):
     """One 'watched/read it' log entry. photo_url comes from POST
     /api/uploads — the client uploads the photo first, then sends the
@@ -185,6 +220,18 @@ class RecordIn(BaseModel):
     rating: float = 0
     memo: Optional[str] = None
     photo_url: Optional[str] = None
+    listen_url: Optional[str] = None
+
+    @field_validator("listen_url")
+    @classmethod
+    def _youtube_only(cls, v: Optional[str]) -> Optional[str]:
+        """유튜브 주소만 — 방을 구경하는 사람도 누르는 링크라 아무 주소나 받지 않음."""
+        v = (v or "").strip()
+        if not v:
+            return None
+        if len(v) > LISTEN_URL_MAX or not is_youtube_url(v):
+            raise ValueError("listen_url must be a YouTube link")
+        return v
 
 
 class RecordOut(RecordIn):

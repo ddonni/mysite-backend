@@ -91,6 +91,19 @@ def search_music(
         raise HTTPException(status_code=503, detail="music search unavailable")
 
 
+@router.get("/api/search/music/listen", response_model=schemas.MusicListenOut)
+def music_listen(
+    request: Request,
+    album_id: str = Query(..., min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$"),
+    song: str = Query(..., min_length=1, max_length=200),
+):
+    """검색 결과의 앨범 줄에서 고른 노래를 틀 유튜브 주소(music_search.album_listen) — 못
+    찾으면 listen이 null(사용자가 직접 붙여 넣을 수 있음)."""
+    check_rate_limit(request, _music_searches, MUSIC_SEARCH_LIMIT, MUSIC_SEARCH_WINDOW, TOO_MANY)
+    song = song.strip()
+    return {"listen": _music_cache.get_or_set(("listen", album_id, song), lambda: music_search.album_listen(album_id, song))}
+
+
 @router.get("/api/search/screen", response_model=List[schemas.ScreenResult])
 def search_screen(
     request: Request,

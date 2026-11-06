@@ -70,6 +70,10 @@ class Record(Base):
     # (crud.set_playing이 다른 곡을 끔). 아무것도 안 고르면 프론트(showcase.js의
     # pickMusic)가 최애음악 첫 번째, 없으면 가장 최근 곡을 돌림.
     playing = Column(Boolean, nullable=False, default=False, server_default=false())
+    # 음악을 실제로 틀 유튜브 주소(schemas.listen_url이 유튜브 주소만 받음) — 검색 결과에서
+    # 고르면 앨범 재생목록 + 몇 번째 곡(music_search.listen_url), 직접 붙여 넣으면 영상 주소.
+    # 프론트는 유튜브 임베드 플레이어로 틂(js/shared/youtube.js). 없으면 NULL.
+    listen_url = Column(String, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     room = relationship("Room", back_populates="records")

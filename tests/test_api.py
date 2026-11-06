@@ -1148,9 +1148,9 @@ def test_music_search_keeps_albums_and_songs_only(ytm):
     assert ytm == [("아이유 꽃갈피", None)]
     assert resp.json() == [
         {"album": "꽃갈피", "song": None, "creator": "아이유(IU)", "kind": "EP", "year": "2014",
-         "cover": "https://yt3.googleusercontent.com/a=w544"},  # 가장 큰 썸네일
+         "cover": "https://yt3.googleusercontent.com/a=w544", "listen": None, "album_id": None},  # 가장 큰 썸네일
         {"album": "꽃갈피", "song": "나의 옛날이야기", "creator": "아이유(IU)", "kind": "노래", "year": "",
-         "cover": None},
+         "cover": None, "listen": None, "album_id": None},
     ]
 
 
@@ -1452,7 +1452,7 @@ def test_music_search_puts_the_songs_album_first_with_korean_names(monkeypatch):
     first, second = resp.json()
     # 앨범·가수는 유튜브의 한국어 이름, 연도는 iTunes에서. song은 비움(제목은 쓴 그대로 두는 규칙).
     assert first == {"album": "TEAM BABY", "song": None, "creator": "검정치마", "kind": "앨범",
-                     "year": "2017", "cover": "https://yt3.googleusercontent.com/tb"}
+                     "year": "2017", "cover": "https://yt3.googleusercontent.com/tb", "listen": None, "album_id": None}
     assert second["album"] == "Good Music For Dating"
 
 
@@ -1490,7 +1490,7 @@ def test_music_search_falls_back_to_itunes_names_when_youtube_has_no_such_album(
     ]})
     (first,) = client.get("/api/search/music", params={"q": "나랑 아니면"}).json()
     assert first == {"album": "Who Do You Love", "song": None, "creator": "The Black Skirts", "kind": "싱글",
-                     "year": "2017", "cover": "https://is1-ssl.mzstatic.com/a/600x600bb.jpg"}
+                     "year": "2017", "cover": "https://is1-ssl.mzstatic.com/a/600x600bb.jpg", "listen": None, "album_id": None}
 
 
 def test_music_search_keeps_youtube_results_when_itunes_fails(monkeypatch, ytm):
@@ -1534,7 +1534,7 @@ def _artist_with_releases(monkeypatch, albums, singles, tracklists):
     def fake_album(browse_id):
         if browse_id not in tracklists:
             raise Exception("album failed")
-        return {"tracks": [{"title": t} for t in tracklists[browse_id]]}
+        return {"tracks": [{"title": t} for t in tracklists[browse_id]], "audioPlaylistId": f"OLAK_{browse_id}"}
     monkeypatch.setattr("app.music_search._album", fake_album)
 
 
@@ -1552,7 +1552,64 @@ def test_music_search_songs_lists_the_artists_songs_with_their_album(monkeypatch
     # 앨범 먼저, 싱글로 또 나온 같은 노래는 한 번만, 실패한 앨범은 빼고
     assert [s["song"] for s in body] == ["Ling Ling", "나랑 아니면", "폭죽과 별"]
     assert body[0] == {"album": "TEAM BABY", "song": "Ling Ling", "creator": "검정치마", "kind": "노래",
-                       "year": "2017", "cover": "https://yt3.googleusercontent.com/tb"}
+                       "year": "2017", "cover": "https://yt3.googleusercontent.com/tb",
+                       "listen": "https://www.youtube.com/playlist?list=OLAK_A1&index=1", "album_id": "A1"}
+    # 몇 번째 곡인지 — 앨범 재생목록에서 그 곡부터 틀게
+    assert body[1]["listen"] == "https://www.youtube.com/playlist?list=OLAK_A1&index=2"
+
+
+def test_music_listen_finds_the_song_in_the_album(monkeypatch):
+    monkeypatch.setattr("app.music_search._album", lambda b: {
+        "audioPlaylistId": "OLAK_x", "tracks": [{"title": "Ling Ling"}, {"title": "나랑 아니면"}],
+    })
+    body = client.get("/api/search/music/listen", params={"album_id": "MPREb_1", "song": "나랑아니면"}).json()
+    assert body == {"listen": "https://www.youtube.com/playlist?list=OLAK_x&index=2"}
+    body = client.get("/api/search/music/listen", params={"album_id": "MPREb_1", "song": "없는 노래"}).json()
+    assert body == {"listen": None}
+
+
+def test_music_listen_uses_the_only_track_of_a_single(monkeypatch):
+    # 싱글은 곡이 하나라 제목이 달라도(영어 제목 등) 그 곡
+    monkeypatch.setattr("app.music_search._album", lambda b: {"audioPlaylistId": "OLAK_s", "tracks": [{"title": "Muttering"}]})
+    body = client.get("/api/search/music/listen", params={"album_id": "MPREb_2", "song": "넋두리"}).json()
+    assert body == {"listen": "https://www.youtube.com/playlist?list=OLAK_s&index=1"}
+
+
+def test_music_listen_is_null_when_the_album_fails(monkeypatch):
+    def broken(b):
+        raise Exception("down")
+    monkeypatch.setattr("app.music_search._album", broken)
+    body = client.get("/api/search/music/listen", params={"album_id": "MPREb_3", "song": "x"}).json()
+    assert body == {"listen": None}
+
+
+def test_music_listen_rejects_a_strange_album_id():
+    resp = client.get("/api/search/music/listen", params={"album_id": "../etc", "song": "x"})
+    assert resp.status_code == 422
+
+
+def test_record_keeps_a_youtube_listen_url(room):
+    r = room
+    url = "https://www.youtube.com/watch?v=6Evs8LO4TeA"
+    rec = client.post(f"/api/rooms/{r['code']}/records", json=make_record(cat="music", listen_url=url), headers=auth(r)).json()
+    assert rec["listen_url"] == url
+    # 빈 칸은 없음으로
+    rec = client.put(f"/api/rooms/{r['code']}/records/{rec['id']}", json=make_record(cat="music", listen_url="  "), headers=auth(r)).json()
+    assert rec["listen_url"] is None
+
+
+def test_record_rejects_a_listen_url_that_is_not_youtube(room):
+    r = room
+    for bad in ["https://evil.example/watch?v=6Evs8LO4TeA", "javascript:alert(1)",
+                "http://www.youtube.com/watch?v=6Evs8LO4TeA", "https://www.youtube.com/",
+                "https://youtube.com.evil.example/watch?v=abcdefg"]:
+        resp = client.post(f"/api/rooms/{r['code']}/records", json=make_record(cat="music", listen_url=bad), headers=auth(r))
+        assert resp.status_code == 422, bad
+    for good in ["https://youtu.be/6Evs8LO4TeA?si=x", "https://music.youtube.com/watch?v=6Evs8LO4TeA&list=OLAK5uy_x",
+                 "https://www.youtube.com/playlist?list=OLAK5uy_m4cY6p5Ano8x3VDpcZNuuWihX1LTNGVmk&index=1",
+                 "https://m.youtube.com/watch?v=6Evs8LO4TeA"]:
+        resp = client.post(f"/api/rooms/{r['code']}/records", json=make_record(cat="music", listen_url=good), headers=auth(r))
+        assert resp.status_code == 200, good
 
 
 def test_music_search_songs_includes_releases_beyond_the_artist_page(monkeypatch):
