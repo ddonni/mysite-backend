@@ -217,13 +217,20 @@ def list_public_rooms(db: Session = Depends(get_db)):
 
 @app.get("/api/rooms/{code}")
 def read_room(room: models.Room = Depends(get_room)):
-    return {"code": room.code, "theme": room.theme, "name": room.name, "is_public": room.is_public}
+    return {"code": room.code, "theme": room.theme, "name": room.name, "is_public": room.is_public,
+            "wardrobe_public": room.wardrobe_public}
 
 
 @app.put("/api/rooms/{code}/visibility")
 def update_visibility(body: schemas.RoomVisibilityIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
     crud.set_public(db, room, body.public)
     return {"is_public": room.is_public}
+
+
+@app.put("/api/rooms/{code}/wardrobe-visibility")
+def update_wardrobe_visibility(body: schemas.WardrobeVisibilityIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
+    crud.set_wardrobe_public(db, room, body.public)
+    return {"wardrobe_public": room.wardrobe_public}
 
 
 @app.put("/api/rooms/{code}/theme")
@@ -332,8 +339,15 @@ def remove_page(n: int, room: models.Room = Depends(require_owner), db: Session 
 
 
 @app.get("/api/rooms/{code}/records", response_model=List[schemas.RecordOut])
-def list_records(cat: Optional[str] = None, room: models.Room = Depends(get_room), db: Session = Depends(get_db)):
-    return crud.list_records(db, room.id, cat)
+def list_records(
+    cat: Optional[str] = None,
+    room: models.Room = Depends(get_room),
+    x_room_token: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """코드만 있으면 누구나 — 단, 옷장은 방 주인(X-Room-Token)이거나 옷장 공개를 켰을 때만."""
+    with_wardrobe = room.wardrobe_public or _token_matches(x_room_token, room.token)
+    return crud.list_records(db, room.id, cat, with_wardrobe)
 
 
 @app.get("/api/rooms/{code}/suggestions", response_model=List[schemas.SuggestionOut])

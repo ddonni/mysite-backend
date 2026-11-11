@@ -37,6 +37,9 @@ class Room(Base):
     # 꺼져 있어도 코드를 아는 사람은 지금처럼 들어올 수 있음(목록에만 안 뜸).
     # 처음엔 다들 비공개 — 모르는 사이에 남들 목록에 뜨지 않게.
     is_public = Column(Boolean, nullable=False, default=False, server_default=false())
+    # 옷장 기록(cat="wardrobe")을 방문자에게도 보여 줄지 — 방 주인이 켬. 다른 기록은
+    # 코드만 있으면 누구나 보지만, 옷장은 처음엔 주인만(꺼져 있으면 GET 목록에서 빠짐).
+    wardrobe_public = Column(Boolean, nullable=False, default=False, server_default=false())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     pages = relationship("Page", back_populates="room", cascade="all, delete-orphan")
@@ -74,6 +77,10 @@ class Record(Base):
     # 고르면 앨범 재생목록 + 몇 번째 곡(music_search.listen_url), 직접 붙여 넣으면 영상 주소.
     # 프론트는 유튜브 임베드 플레이어로 틂(js/shared/youtube.js). 없으면 NULL.
     listen_url = Column(String, nullable=True)
+    # 카테고리별 추가 칸 — 지금은 옷장만 씀({"kind": "top", "color": "navy",
+    # "seasons": ["spring", "fall"]}, schemas.WardrobeAttrs). 옷 이름은 title, 브랜드는
+    # creator, 메모는 memo를 그대로 씀. 다른 카테고리는 NULL.
+    attrs = Column(JSON, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     room = relationship("Room", back_populates="records")

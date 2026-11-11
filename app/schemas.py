@@ -4,7 +4,7 @@ from typing import Annotated, Dict, List, Literal, Optional
 
 from urllib.parse import parse_qs, urlparse
 
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 
 class RoomOut(BaseModel):
@@ -31,6 +31,12 @@ class RoomNameIn(BaseModel):
     빈 문자열이면 이름을 지움(로비 제목이 다시 기본 "로비"로 돌아감)."""
 
     name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)]
+
+
+class WardrobeVisibilityIn(BaseModel):
+    """PUT .../wardrobe-visibility — 옷장 기록을 방문자에게도 보여 줄지."""
+
+    public: bool
 
 
 class RoomVisibilityIn(BaseModel):
@@ -207,6 +213,30 @@ def is_youtube_url(url: str) -> bool:
     return any(_YOUTUBE_ID.match(i or "") for i in ids)
 
 
+CATS = ("book", "anime", "movie", "music", "wardrobe")
+# 옷장 칸에서 고를 수 있는 값 — 프론트 js/library/modal/wardrobeFields.js와 같아야 함.
+WARDROBE_KINDS = ("top", "bottom", "outer", "dress", "shoes", "bag", "acc")
+WARDROBE_COLORS = (
+    "black", "white", "gray", "beige", "brown", "navy", "blue", "sky",
+    "green", "khaki", "red", "pink", "purple", "yellow", "orange", "multi",
+)
+WARDROBE_SEASONS = ("spring", "summer", "fall", "winter")
+
+
+class WardrobeAttrs(BaseModel):
+    """옷 하나의 추가 칸(전부 선택) — 나중에 AI 조합·구매 추천에 쓸 수 있게 정해진
+    값만 받음. 계절은 여러 개, 같은 값은 한 번만."""
+
+    kind: Optional[Literal[WARDROBE_KINDS]] = None
+    color: Optional[Literal[WARDROBE_COLORS]] = None
+    seasons: List[Literal[WARDROBE_SEASONS]] = []
+
+    @field_validator("seasons")
+    @classmethod
+    def _unique(cls, v: list) -> list:
+        return [s for s in WARDROBE_SEASONS if s in v]
+
+
 class RecordIn(BaseModel):
     """One 'watched/read it' log entry. photo_url comes from POST
     /api/uploads — the client uploads the photo first, then sends the
@@ -214,13 +244,23 @@ class RecordIn(BaseModel):
     URL picked from GET /api/search/book (stored as-is, shown through
     GET /api/cover)."""
 
-    cat: Literal["book", "anime", "movie", "music"]
+    cat: Literal[CATS]
     title: str
     creator: Optional[str] = None
     rating: float = 0
     memo: Optional[str] = None
     photo_url: Optional[str] = None
     listen_url: Optional[str] = None
+    attrs: Optional[WardrobeAttrs] = None
+
+    @model_validator(mode="after")
+    def _attrs_only_for_wardrobe(self) -> "RecordIn":
+        # 추가 칸은 옷장만 — 다른 카테고리로 바꿔 저장하면 지움. 옷장인데 안 보냈으면 빈 칸.
+        if self.cat != "wardrobe":
+            self.attrs = None
+        elif self.attrs is None:
+            self.attrs = WardrobeAttrs()
+        return self
 
     @field_validator("listen_url")
     @classmethod

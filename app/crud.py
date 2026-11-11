@@ -55,6 +55,13 @@ def set_name(db: Session, room: models.Room, name: str) -> models.Room:
     return room
 
 
+def set_wardrobe_public(db: Session, room: models.Room, public: bool) -> models.Room:
+    room.wardrobe_public = public
+    db.commit()
+    db.refresh(room)
+    return room
+
+
 def set_public(db: Session, room: models.Room, public: bool) -> models.Room:
     room.is_public = public
     db.commit()
@@ -104,7 +111,8 @@ def list_public_rooms(db: Session) -> List[dict]:
     rooms.sort(key=latest_of, reverse=True)
     out = []
     for room in rooms[:PUBLIC_ROOMS_LIMIT]:
-        counts = {cat: stats[room.id]["counts"].get(cat, 0) for cat in ("book", "anime", "movie", "music")}
+        cats = ("book", "anime", "movie", "music") + (("wardrobe",) if room.wardrobe_public else ())
+        counts = {cat: stats[room.id]["counts"].get(cat, 0) for cat in cats}
         out.append({"code": room.code, "name": room.name, "theme": room.theme, "counts": counts, "total": sum(counts.values())})
     return out
 
@@ -261,10 +269,12 @@ def delete_page(db: Session, room_id: int, page_number: int) -> Tuple[bool, Opti
     return True, None
 
 
-def list_records(db: Session, room_id: int, cat: Optional[str] = None) -> list:
+def list_records(db: Session, room_id: int, cat: Optional[str] = None, with_wardrobe: bool = True) -> list:
     q = db.query(models.Record).filter(models.Record.room_id == room_id)
     if cat is not None:
         q = q.filter(models.Record.cat == cat)
+    if not with_wardrobe:
+        q = q.filter(models.Record.cat != "wardrobe")
     return q.order_by(models.Record.date.desc(), models.Record.id.desc()).all()
 
 

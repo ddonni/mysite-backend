@@ -134,7 +134,7 @@ def test_create_room_returns_code_and_token():
 def test_room_lookup_by_code(room):
     resp = client.get(f"/api/rooms/{room['code']}")
     assert resp.status_code == 200
-    assert resp.json() == {"code": room["code"], "theme": "wood", "name": None, "is_public": False}
+    assert resp.json() == {"code": room["code"], "theme": "wood", "name": None, "is_public": False, "wardrobe_public": False}
 
 
 def test_unknown_room_code_is_404():
@@ -1647,3 +1647,67 @@ def test_music_search_songs_is_empty_when_the_artist_is_not_found(monkeypatch):
     resp = client.get("/api/search/music", params={"q": "없는가수", "by": "songs"})
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+# --- 옷장 ---
+
+
+def make_clothes(**overrides):
+    body = {"cat": "wardrobe", "title": "흰 옥스포드 셔츠", "creator": "유니클로", "memo": "자주 입음",
+            "attrs": {"kind": "top", "color": "white", "seasons": ["fall", "spring", "fall"]}}
+    body.update(overrides)
+    return body
+
+
+def test_wardrobe_record_keeps_its_fields(room):
+    resp = client.post(f"/api/rooms/{room['code']}/records", json=make_clothes(), headers=auth(room))
+    assert resp.status_code == 200
+    # 계절은 순서를 맞추고 같은 값은 한 번만
+    assert resp.json()["attrs"] == {"kind": "top", "color": "white", "seasons": ["spring", "fall"]}
+    assert resp.json()["rating"] == 0
+
+
+def test_wardrobe_rejects_unknown_values(room):
+    for attrs in ({"kind": "hat"}, {"color": "#ff0000"}, {"seasons": ["rainy"]}):
+        resp = client.post(f"/api/rooms/{room['code']}/records", json=make_clothes(attrs=attrs), headers=auth(room))
+        assert resp.status_code == 422, attrs
+
+
+def test_attrs_are_dropped_for_other_categories(room):
+    resp = client.post(f"/api/rooms/{room['code']}/records", json=make_record(attrs={"kind": "top"}), headers=auth(room))
+    assert resp.json()["attrs"] is None
+    rid = client.post(f"/api/rooms/{room['code']}/records", json=make_clothes(), headers=auth(room)).json()["id"]
+    resp = client.put(f"/api/rooms/{room['code']}/records/{rid}", json=make_clothes(cat="book"), headers=auth(room))
+    assert resp.json()["attrs"] is None
+
+
+def test_wardrobe_is_owner_only_until_made_public(room):
+    client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=auth(room))
+    client.post(f"/api/rooms/{room['code']}/records", json=make_clothes(), headers=auth(room))
+    url = f"/api/rooms/{room['code']}/records"
+    assert [r["cat"] for r in client.get(url).json()] == ["book"]
+    assert [r["cat"] for r in client.get(url, params={"cat": "wardrobe"}).json()] == []
+    assert [r["cat"] for r in client.get(url, headers={"X-Room-Token": "wrong"}).json()] == ["book"]
+    assert sorted(r["cat"] for r in client.get(url, headers=auth(room)).json()) == ["book", "wardrobe"]
+
+    resp = client.put(f"/api/rooms/{room['code']}/wardrobe-visibility", json={"public": True}, headers=auth(room))
+    assert resp.json() == {"wardrobe_public": True}
+    assert client.get(f"/api/rooms/{room['code']}").json()["wardrobe_public"] is True
+    assert sorted(r["cat"] for r in client.get(url).json()) == ["book", "wardrobe"]
+
+
+def test_wardrobe_visibility_requires_owner_token(room):
+    resp = client.put(f"/api/rooms/{room['code']}/wardrobe-visibility", json={"public": True})
+    assert resp.status_code == 403
+    assert client.get(f"/api/rooms/{room['code']}").json()["wardrobe_public"] is False
+
+
+def test_public_list_counts_wardrobe_only_when_shown(room):
+    client.post(f"/api/rooms/{room['code']}/records", json=make_clothes(), headers=auth(room))
+    client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=auth(room))
+    make_public(room)
+    listed = client.get("/api/rooms").json()[0]
+    assert "wardrobe" not in listed["counts"] and listed["total"] == 1
+    client.put(f"/api/rooms/{room['code']}/wardrobe-visibility", json={"public": True}, headers=auth(room))
+    listed = client.get("/api/rooms").json()[0]
+    assert listed["counts"]["wardrobe"] == 1 and listed["total"] == 2
