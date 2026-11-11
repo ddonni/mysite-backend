@@ -322,29 +322,33 @@ def update_record(db: Session, room_id: int, record_id: int, data: dict) -> Opti
     return record
 
 
-# 로비에서 카테고리마다 인생작 자리가 3개씩 있음(책장 위 액자 3개, 영화
-# 큰 포스터 3장, 애니 진열장 윗칸 스탠드 3개) — 그 자리 수와 맞춤.
+# 인생작 한도 — 로비의 큰 책장(책·애니·영화를 섞어 꽂음) 위 액자 자리가 9개라 그 셋은
+# 합쳐서 SHELF_FEATURED개(카테고리별 개수는 자유, 2026-11-11 사용자 결정). 음악(턴테이블 옆
+# 받침)과 옷장(행거 앞자리)은 각자 FEATURED_PER_CAT개.
+SHELF_CATS = ("book", "anime", "movie")
+SHELF_FEATURED = 9
 FEATURED_PER_CAT = 3
 
 
 class FeaturedLimitError(Exception):
-    """이 카테고리의 인생작이 이미 FEATURED_PER_CAT개 켜져 있음."""
+    """인생작 자리가 이미 꽉 참(책장 셋 합쳐 SHELF_FEATURED개, 나머지는 카테고리마다 FEATURED_PER_CAT개)."""
 
 
 def set_featured(db: Session, room_id: int, record_id: int, featured: bool) -> Optional[models.Record]:
-    """인생작은 방 안에서 카테고리마다 최대 FEATURED_PER_CAT개. 이미 꽉 찬
-    카테고리에 하나 더 켜려고 하면, 다른 걸 몰래 끄는 대신
+    """인생작 켜기/끄기. 이미 꽉 찼는데 하나 더 켜려고 하면, 다른 걸 몰래 끄는 대신
     FeaturedLimitError를 던져서 사용자가 직접 하나를 해제하게 함."""
     record = _get_record(db, room_id, record_id)
     if record is None:
         return None
     if featured and not record.featured:
+        on_shelf = record.cat in SHELF_CATS
+        cats = SHELF_CATS if on_shelf else (record.cat,)
         count = (
             db.query(func.count(models.Record.id))
-            .filter(models.Record.room_id == room_id, models.Record.cat == record.cat, models.Record.featured.is_(True))
+            .filter(models.Record.room_id == room_id, models.Record.cat.in_(cats), models.Record.featured.is_(True))
             .scalar()
         )
-        if count >= FEATURED_PER_CAT:
+        if count >= (SHELF_FEATURED if on_shelf else FEATURED_PER_CAT):
             raise FeaturedLimitError()
     record.featured = featured
     db.commit()

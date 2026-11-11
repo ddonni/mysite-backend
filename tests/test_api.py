@@ -507,36 +507,44 @@ def _create(room, **overrides):
     return client.post(f"/api/rooms/{room['code']}/records", json=make_record(**overrides), headers=auth(room)).json()
 
 
-def test_feature_up_to_three_per_category(room):
-    books = [_create(room, title=f"책{i}") for i in range(4)]
-    for b in books[:3]:
-        resp = _feature(room, b["id"])
-        assert resp.status_code == 200
-        assert resp.json()["featured"] is True
-
-    # 4번째는 다른 걸 몰래 끄지 않고 거절함 — 앞의 셋은 그대로 켜져 있어야 함.
-    resp = _feature(room, books[3]["id"])
-    assert resp.status_code == 400
-    assert resp.json()["detail"] == "featured_limit"
-    records = {r["id"]: r for r in client.get(f"/api/rooms/{room['code']}/records").json()}
-    assert [records[b["id"]]["featured"] for b in books] == [True, True, True, False]
-
-
-def test_feature_limit_is_per_category(room):
-    for i in range(3):
-        _feature(room, _create(room, title=f"책{i}")["id"])
+def test_shelf_features_up_to_nine_across_book_anime_movie(room):
+    # 책장 셋(책·애니·영화)은 합쳐서 9개 — 한 카테고리에 몰아도 됨.
+    books = [_create(room, title=f"책{i}") for i in range(7)]
+    for b in books:
+        assert _feature(room, b["id"]).status_code == 200
+    anime = _create(room, cat="anime", title="하이큐")
+    assert _feature(room, anime["id"]).status_code == 200
     movie = _create(room, cat="movie", title="기생충")
     assert _feature(room, movie["id"]).status_code == 200
 
+    # 10번째는 다른 걸 몰래 끄지 않고 거절함.
+    extra = _create(room, cat="movie", title="괴물")
+    resp = _feature(room, extra["id"])
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "featured_limit"
+    records = {r["id"]: r for r in client.get(f"/api/rooms/{room['code']}/records").json()}
+    assert records[extra["id"]]["featured"] is False
+    assert all(records[b["id"]]["featured"] for b in books)
+
+
+def test_music_and_wardrobe_keep_three_each_apart_from_shelf(room):
+    for i in range(9):
+        _feature(room, _create(room, title=f"책{i}")["id"])
+    songs = [_create(room, cat="music", title=f"노래{i}") for i in range(4)]
+    assert [_feature(room, s["id"]).status_code for s in songs] == [200, 200, 200, 400]
+    clothes = [_create(room, cat="wardrobe", title=f"옷{i}") for i in range(4)]
+    assert [_feature(room, c["id"]).status_code for c in clothes] == [200, 200, 200, 400]
+
 
 def test_unfeature_frees_a_slot_and_refeaturing_is_not_counted_twice(room):
-    books = [_create(room, title=f"책{i}") for i in range(4)]
-    for b in books[:3]:
+    books = [_create(room, title=f"책{i}") for i in range(10)]
+    for b in books[:9]:
         _feature(room, b["id"])
     # 이미 켜진 걸 다시 켜는 건 개수를 늘리지 않음.
     assert _feature(room, books[0]["id"]).status_code == 200
+    assert _feature(room, books[9]["id"]).status_code == 400
     assert _feature(room, books[0]["id"], False).status_code == 200
-    assert _feature(room, books[3]["id"]).status_code == 200
+    assert _feature(room, books[9]["id"]).status_code == 200
 
 
 def test_feature_record_requires_owner_token(room):

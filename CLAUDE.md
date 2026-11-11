@@ -155,7 +155,7 @@ tests/test_api.py
   `"page not found"`, `DELETE`의 404는 `"not_found"`, 마지막 페이지
   삭제 시도는 400 `"last_page"`, 방 코드 자체가 없으면 404
   `"room not found"`, 토큰이 없거나 틀리면 403 `"not room owner"`,
-  인생작(`PUT .../records/{id}/feature`)을 한 카테고리에 3개 넘게 켜려고
+  인생작(`PUT .../records/{id}/feature`)을 한도(책·애니·영화 합쳐 9개, 음악·옷장은 각 3개) 넘게 켜려고
   하면 400 `"featured_limit"`, 음악이 아닌 기록을 턴테이블에 올리려고
   하면(`PUT .../records/{id}/playing`) 400 `"not_music"`. 업로드(`POST .../uploads`)는 이미지 형식이
   아니면(SVG 포함) 415 `"unsupported file type"`, 10MB를 넘으면 413
