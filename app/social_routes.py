@@ -63,6 +63,11 @@ def require_actor(actor: Optional[models.Room] = Depends(optional_actor)) -> mod
     return actor
 
 
+def _require_google(actor: models.Room) -> None:
+    if actor.google_sub is None:
+        raise HTTPException(status_code=403, detail="google_required")
+
+
 def require_google_actor(actor: models.Room = Depends(require_actor)) -> models.Room:
     if actor.google_sub is None:
         raise HTTPException(status_code=403, detail="google_required")
@@ -82,6 +87,8 @@ def _entry_out(entry: models.GuestbookEntry, room: models.Room, actor: Optional[
             "code": author.code, "name": author.name, "avatar_url": author.avatar_url,
         },
         "mine": mine,
+        # 방 주인이 쓴 글(익명이 아니면) — 방문자 화면에서 "주인" 표시.
+        "by_owner": entry.author_room_id == room.id and not entry.anonymous,
         "can_delete": actor is not None and (mine or actor.id == room.id),
     }
 
@@ -109,10 +116,13 @@ def post_guestbook(
     code: str,
     body: schemas.GuestbookIn,
     request: Request,
-    actor: models.Room = Depends(require_google_actor),
+    actor: models.Room = Depends(require_actor),
     db: Session = Depends(get_db),
 ):
     room = _room(code, db)
+    # 방 주인은 자기 방명록에 구글 연동 없이도 씀(답글 — 토큰으로 이미 주인임이 증명됨).
+    if actor.id != room.id:
+        _require_google(actor)
     check_rate_limit(request, _guestbook_posts, GUESTBOOK_POST_LIMIT, GUESTBOOK_POST_WINDOW,
                      "too many guestbook posts, try again later")
     entry = models.GuestbookEntry(room_id=room.id, author_room_id=actor.id, message=body.message, anonymous=body.anonymous)

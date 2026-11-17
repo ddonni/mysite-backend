@@ -348,6 +348,7 @@ class GuestbookOut(BaseModel):
     created_at: Optional[datetime] = None
     author: Optional[GuestbookAuthor] = None
     mine: bool = False
+    by_owner: bool = False
     can_delete: bool = False
 
 

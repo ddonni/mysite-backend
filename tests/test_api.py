@@ -1876,3 +1876,13 @@ def test_public_list_shows_up_to_twelve_featured(room):
     assert len(featured) == 12
     assert [f["cat"] for f in featured[:3]] == ["book"] * 3 and featured[-1]["cat"] == "music"
     assert "평범" not in [f["title"] for f in featured]
+
+
+def test_owner_writes_own_guestbook_without_google(room):
+    url = f"/api/rooms/{room['code']}/guestbook"
+    resp = client.post(url, json={"message": "와 줘서 고마워요"}, headers=actor(room))
+    assert resp.status_code == 200 and resp.json()["mine"] is True
+    assert client.get(url).json()["entries"][0]["by_owner"] is True
+    # 남의 방명록엔 여전히 구글 연동이 필요함
+    other = client.post("/api/rooms").json()
+    assert client.post(f"/api/rooms/{other['code']}/guestbook", json={"message": "hi"}, headers=actor(room)).status_code == 403
