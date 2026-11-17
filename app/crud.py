@@ -384,6 +384,7 @@ def delete_record(db: Session, room_id: int, record_id: int) -> bool:
     record = _get_record(db, room_id, record_id)
     if record is None:
         return False
+    db.query(models.RecordLike).filter(models.RecordLike.record_id == record.id).delete()
     db.delete(record)
     db.commit()
     return True

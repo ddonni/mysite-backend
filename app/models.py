@@ -112,6 +112,19 @@ class RoomLike(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class RecordLike(Base):
+    """카드(기록 하나)에 누른 공감 — liker_room(누른 사람의 방)이 record에. 한 번만(유니크).
+    기록을 지우면 같이 지움(crud.delete_record)."""
+
+    __tablename__ = "record_likes"
+    __table_args__ = (UniqueConstraint("record_id", "liker_room_id", name="uq_record_likes_record_liker"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    record_id = Column(Integer, ForeignKey("records.id"), nullable=False, index=True)
+    liker_room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Feedback(Base):
     """사이트 어디서나 "의견 보내기"로 받은 피드백 한 건. 방과 달리 누구나
     (토큰 없이) 보낼 수 있고, 로그인이 없으니 누가 보냈는지는 본인이 적은

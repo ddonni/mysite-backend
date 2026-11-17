@@ -270,6 +270,9 @@ class RecordOut(RecordIn):
     date: str
     featured: bool = False
     playing: bool = False
+    # 카드 공감 — likes는 받은 수, liked는 요청한 사람(X-Actor-*)이 눌렀는지. 목록 GET에서만 채움.
+    likes: int = 0
+    liked: bool = False
 
 
 class RecordFeatureIn(BaseModel):

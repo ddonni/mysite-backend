@@ -346,8 +346,16 @@ def remove_page(n: int, room: models.Room = Depends(require_owner), db: Session 
 
 
 @app.get("/api/rooms/{code}/records", response_model=List[schemas.RecordOut])
-def list_records(cat: Optional[str] = None, room: models.Room = Depends(get_room), db: Session = Depends(get_db)):
-    return crud.list_records(db, room.id, cat)
+def list_records(
+    cat: Optional[str] = None,
+    room: models.Room = Depends(get_room),
+    actor: Optional[models.Room] = Depends(social_routes.optional_actor),
+    db: Session = Depends(get_db),
+):
+    """코드만 있으면 누구나. X-Actor-* 헤더(보는 사람의 방)를 주면 카드마다 내가 공감했는지도."""
+    records = crud.list_records(db, room.id, cat)
+    social_routes.attach_record_likes(db, records, actor)
+    return records
 
 
 @app.get("/api/rooms/{code}/suggestions", response_model=List[schemas.SuggestionOut])

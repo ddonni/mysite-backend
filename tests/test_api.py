@@ -1787,3 +1787,27 @@ def test_likes_need_google_and_not_own_room(room, visitor):
     give_google(room, "g-owner")
     resp = client.put(url, headers=actor(room))
     assert resp.status_code == 400 and resp.json()["detail"] == "own_room"
+
+
+def test_record_likes_toggle_and_show_in_list(room, visitor):
+    rid = client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=auth(room)).json()["id"]
+    url = f"/api/rooms/{room['code']}/records/{rid}/likes"
+    assert client.put(url).status_code == 401
+    assert client.put(url, headers=actor(visitor)).json() == {"count": 1, "liked": True}
+    listed = client.get(f"/api/rooms/{room['code']}/records", headers=actor(visitor)).json()[0]
+    assert listed["likes"] == 1 and listed["liked"] is True
+    anon = client.get(f"/api/rooms/{room['code']}/records").json()[0]
+    assert anon["likes"] == 1 and anon["liked"] is False
+    assert client.delete(url, headers=actor(visitor)).json() == {"count": 0, "liked": False}
+
+
+def test_record_likes_need_google_not_own_and_go_with_record(room, visitor):
+    rid = client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=auth(room)).json()["id"]
+    url = f"/api/rooms/{room['code']}/records/{rid}/likes"
+    stranger = client.post("/api/rooms").json()
+    assert client.put(url, headers=actor(stranger)).json()["detail"] == "google_required"
+    give_google(room, "g-owner")
+    assert client.put(url, headers=actor(room)).json()["detail"] == "own_room"
+    assert client.put(f"/api/rooms/{room['code']}/records/99999/likes", headers=actor(visitor)).status_code == 404
+    client.put(url, headers=actor(visitor))
+    assert client.delete(f"/api/rooms/{room['code']}/records/{rid}", headers=auth(room)).status_code == 200

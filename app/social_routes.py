@@ -139,6 +139,60 @@ def delete_guestbook(code: str, entry_id: int, actor: models.Room = Depends(requ
     return {"ok": True}
 
 
+# ---- 카드 공감(기록 하나에 누르는 좋아요) ----
+
+
+def attach_record_likes(db: Session, records: List[models.Record], actor: Optional[models.Room]) -> None:
+    """기록 목록에 받은 공감 수(likes)와 보는 사람이 눌렀는지(liked)를 붙임 — 목록 GET(main.py)이 씀.
+    DB 칸이 아니라 응답용으로만 잠깐 붙이는 값(RecordOut이 읽음)."""
+    ids = [r.id for r in records]
+    counts: Dict[int, int] = {}
+    mine = set()
+    if ids:
+        counts = dict(
+            db.query(models.RecordLike.record_id, func.count(models.RecordLike.id))
+            .filter(models.RecordLike.record_id.in_(ids))
+            .group_by(models.RecordLike.record_id)
+            .all()
+        )
+        if actor is not None:
+            mine = {rid for (rid,) in db.query(models.RecordLike.record_id).filter(
+                models.RecordLike.record_id.in_(ids), models.RecordLike.liker_room_id == actor.id)}
+    for r in records:
+        r.likes = counts.get(r.id, 0)
+        r.liked = r.id in mine
+
+
+def _record(db: Session, room: models.Room, record_id: int) -> models.Record:
+    record = db.query(models.Record).filter(models.Record.id == record_id, models.Record.room_id == room.id).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="record not found")
+    return record
+
+
+def _record_likes(db: Session, record: models.Record, actor: models.Room) -> dict:
+    count = db.query(func.count(models.RecordLike.id)).filter(models.RecordLike.record_id == record.id).scalar()
+    liked = db.query(models.RecordLike.id).filter(
+        models.RecordLike.record_id == record.id, models.RecordLike.liker_room_id == actor.id
+    ).first() is not None
+    return {"count": count, "liked": liked}
+
+
+@router.put("/api/rooms/{code}/records/{record_id}/likes", response_model=schemas.LikesOut)
+def like_record(code: str, record_id: int, actor: models.Room = Depends(require_google_actor), db: Session = Depends(get_db)):
+    room = _room(code, db)
+    if room.id == actor.id:
+        raise HTTPException(status_code=400, detail="own_room")
+    record = _record(db, room, record_id)
+    exists = db.query(models.RecordLike.id).filter(
+        models.RecordLike.record_id == record.id, models.RecordLike.liker_room_id == actor.id
+    ).first()
+    if exists is None:
+        db.add(models.RecordLike(record_id=record.id, liker_room_id=actor.id))
+        db.commit()
+    return _record_likes(db, record, actor)
+
+
 @router.delete("/api/rooms/{code}/records/{record_id}/likes", response_model=schemas.LikesOut)
 def unlike_record(code: str, record_id: int, actor: models.Room = Depends(require_actor), db: Session = Depends(get_db)):
     room = _room(code, db)
