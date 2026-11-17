@@ -77,6 +77,7 @@ class PublicRoomOut(BaseModel):
     theme: str
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
+    likes: int = 0
     counts: Dict[str, int]
     total: int
 

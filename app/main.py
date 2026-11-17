@@ -210,10 +210,10 @@ def admin_list_feedback(_: str = Depends(require_admin), db: Session = Depends(g
 
 
 @app.get("/api/rooms", response_model=List[schemas.PublicRoomOut])
-def list_public_rooms(db: Session = Depends(get_db)):
-    """"방 둘러보기" — 방 주인이 공개로 켠 방들(기록이 있는 방만, 최근 활동순).
-    누구나 볼 수 있는 값(코드·이름·테마·카테고리별 기록 수)만 돌려줌."""
-    return crud.list_public_rooms(db)
+def list_public_rooms(sort: Literal["recent", "popular"] = "recent", db: Session = Depends(get_db)):
+    """"방 둘러보기" — 방 주인이 공개로 켠 방들(기록이 있는 방만). sort=recent(기본)는 최근 활동순,
+    popular는 받은 좋아요 많은 순. 누구나 볼 수 있는 값(코드·이름·테마·프로필·좋아요·기록 수)만."""
+    return crud.list_public_rooms(db, sort)
 
 
 @app.get("/api/rooms/{code}")

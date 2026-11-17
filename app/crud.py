@@ -79,7 +79,7 @@ def set_public(db: Session, room: models.Room, public: bool) -> models.Room:
 PUBLIC_ROOMS_LIMIT = 60
 
 
-def list_public_rooms(db: Session) -> List[dict]:
+def list_public_rooms(db: Session, sort: str = "recent") -> List[dict]:
     """"방 둘러보기" 목록 — 공개로 켠 방 중 기록이 하나라도 있는 방만(빈
     방은 구경할 게 없어서 뺌), 기록을 가장 최근에 남기거나 고친 방부터.
     방마다 카테고리별 기록 수를 붙여 줌. 규모가 작아서 방 수만큼 따로 세지
@@ -116,11 +116,20 @@ def list_public_rooms(db: Session) -> List[dict]:
         return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
     rooms.sort(key=latest_of, reverse=True)
+    # 받은 좋아요 수(방 좋아요 — app/social_routes.py). sort="popular"면 많은 순(같으면 최근 활동순 유지).
+    likes = dict(
+        db.query(models.RoomLike.room_id, func.count(models.RoomLike.id))
+        .filter(models.RoomLike.room_id.in_(stats.keys()))
+        .group_by(models.RoomLike.room_id)
+        .all()
+    )
+    if sort == "popular":
+        rooms.sort(key=lambda r: likes.get(r.id, 0), reverse=True)
     out = []
     for room in rooms[:PUBLIC_ROOMS_LIMIT]:
         counts = {cat: stats[room.id]["counts"].get(cat, 0) for cat in ("book", "anime", "movie", "music")}
         out.append({"code": room.code, "name": room.name, "theme": room.theme, "avatar_url": room.avatar_url,
-                    "bio": room.bio, "counts": counts, "total": sum(counts.values())})
+                    "bio": room.bio, "likes": likes.get(room.id, 0), "counts": counts, "total": sum(counts.values())})
     return out
 
 

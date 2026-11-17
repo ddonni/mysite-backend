@@ -1811,3 +1811,17 @@ def test_record_likes_need_google_not_own_and_go_with_record(room, visitor):
     assert client.put(f"/api/rooms/{room['code']}/records/99999/likes", headers=actor(visitor)).status_code == 404
     client.put(url, headers=actor(visitor))
     assert client.delete(f"/api/rooms/{room['code']}/records/{rid}", headers=auth(room)).status_code == 200
+
+
+def test_public_rooms_popular_sort(visitor):
+    a = client.post("/api/rooms").json()
+    b = client.post("/api/rooms").json()
+    for r in (a, b):
+        client.post(f"/api/rooms/{r['code']}/records", json=make_record(), headers=auth(r))
+        make_public(r)
+    # 좋아요는 a만 받음(최근 활동순은 같은 초 안이라 순서가 안 정해져서 보지 않음)
+    client.post(f"/api/rooms/{b['code']}/records", json=make_record(title="새 책"), headers=auth(b))
+    client.put(f"/api/rooms/{a['code']}/likes", headers=actor(visitor))
+    popular = client.get("/api/rooms", params={"sort": "popular"}).json()
+    assert popular[0]["code"] == a["code"] and popular[0]["likes"] == 1
+    assert client.get("/api/rooms", params={"sort": "weird"}).status_code == 422
