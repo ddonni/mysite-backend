@@ -6,6 +6,11 @@ from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
+from . import storage
+
+# storage.upload_photo가 만드는 키 이름(uuid hex + 확장자).
+_UPLOADED_KEY = re.compile(r"^[0-9a-f]{32}\.[a-z]{3,4}$")
+
 
 class RoomOut(BaseModel):
     """Returned once, right after a room is created. `token` is the
@@ -33,6 +38,30 @@ class RoomNameIn(BaseModel):
     name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)]
 
 
+class RoomBioIn(BaseModel):
+    """PUT .../bio — 기록을 소개하는 한 줄. 앞뒤 공백을 잘라 40자까지, 빈 문자열이면 지움."""
+
+    bio: Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]
+
+
+class RoomAvatarIn(BaseModel):
+    """PUT .../avatar — 프로필 사진. POST .../uploads가 돌려준 우리 S3 주소만 받음(남의 서버
+    주소를 넣어 방문자 브라우저가 아무 데나 요청하게 만들지 못하게). 비우거나 null이면 기본 사진."""
+
+    avatar_url: Optional[str] = None
+
+    @field_validator("avatar_url")
+    @classmethod
+    def _uploaded_only(cls, v: Optional[str]) -> Optional[str]:
+        v = (v or "").strip()
+        if not v:
+            return None
+        prefix = storage.uploaded_url_prefix()
+        if len(v) > 300 or not v.startswith(prefix) or not _UPLOADED_KEY.match(v[len(prefix):]):
+            raise ValueError("avatar_url must be an uploaded photo")
+        return v
+
+
 class RoomVisibilityIn(BaseModel):
     """PUT .../visibility — "방 둘러보기" 목록에 올릴지(true) 내릴지(false)."""
 
@@ -46,6 +75,8 @@ class PublicRoomOut(BaseModel):
     code: str
     name: Optional[str] = None
     theme: str
+    avatar_url: Optional[str] = None
+    bio: Optional[str] = None
     counts: Dict[str, int]
     total: int
 

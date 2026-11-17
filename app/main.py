@@ -217,13 +217,26 @@ def list_public_rooms(db: Session = Depends(get_db)):
 
 @app.get("/api/rooms/{code}")
 def read_room(room: models.Room = Depends(get_room)):
-    return {"code": room.code, "theme": room.theme, "name": room.name, "is_public": room.is_public}
+    return {"code": room.code, "theme": room.theme, "name": room.name, "is_public": room.is_public,
+            "avatar_url": room.avatar_url, "bio": room.bio}
 
 
 @app.put("/api/rooms/{code}/visibility")
 def update_visibility(body: schemas.RoomVisibilityIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
     crud.set_public(db, room, body.public)
     return {"is_public": room.is_public}
+
+
+@app.put("/api/rooms/{code}/bio")
+def update_bio(body: schemas.RoomBioIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
+    crud.set_bio(db, room, body.bio)
+    return {"bio": room.bio}
+
+
+@app.put("/api/rooms/{code}/avatar")
+def update_avatar(body: schemas.RoomAvatarIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
+    crud.set_avatar(db, room, body.avatar_url)
+    return {"avatar_url": room.avatar_url}
 
 
 @app.put("/api/rooms/{code}/theme")

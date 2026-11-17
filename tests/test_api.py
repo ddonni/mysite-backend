@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
 from app.database import Base, engine, get_db
-from app import models
+from app import models, storage
 from app.database import SessionLocal
 from app.main import FEEDBACK_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW, _feedback_posts, _room_creations, app
 from app.search_routes import (
@@ -134,7 +134,8 @@ def test_create_room_returns_code_and_token():
 def test_room_lookup_by_code(room):
     resp = client.get(f"/api/rooms/{room['code']}")
     assert resp.status_code == 200
-    assert resp.json() == {"code": room["code"], "theme": "wood", "name": None, "is_public": False}
+    assert resp.json() == {"code": room["code"], "theme": "wood", "name": None, "is_public": False,
+                           "avatar_url": None, "bio": None}
 
 
 def test_unknown_room_code_is_404():
@@ -1647,3 +1648,42 @@ def test_music_search_songs_is_empty_when_the_artist_is_not_found(monkeypatch):
     resp = client.get("/api/search/music", params={"q": "없는가수", "by": "songs"})
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+# --- 프로필(사진·한 줄 소개) ---
+
+
+def test_bio_is_trimmed_visible_to_visitors_and_blank_clears(room):
+    resp = client.put(f"/api/rooms/{room['code']}/bio", json={"bio": "  읽고 본 것들  "}, headers=auth(room))
+    assert resp.json() == {"bio": "읽고 본 것들"}
+    assert client.get(f"/api/rooms/{room['code']}").json()["bio"] == "읽고 본 것들"
+    assert client.put(f"/api/rooms/{room['code']}/bio", json={"bio": " "}, headers=auth(room)).json() == {"bio": None}
+
+
+def test_bio_rejects_over_40_chars_and_needs_owner(room):
+    assert client.put(f"/api/rooms/{room['code']}/bio", json={"bio": "가" * 41}, headers=auth(room)).status_code == 422
+    assert client.put(f"/api/rooms/{room['code']}/bio", json={"bio": "안녕"}).status_code == 403
+
+
+def test_avatar_accepts_only_our_uploaded_photos(room, monkeypatch):
+    monkeypatch.setattr(storage, "S3_BUCKET_NAME", "bucket")
+    monkeypatch.setattr(storage, "AWS_REGION", "ap-northeast-2")
+    url = "https://bucket.s3.ap-northeast-2.amazonaws.com/records/" + "a" * 32 + ".jpg"
+    resp = client.put(f"/api/rooms/{room['code']}/avatar", json={"avatar_url": url}, headers=auth(room))
+    assert resp.json() == {"avatar_url": url}
+    assert client.get(f"/api/rooms/{room['code']}").json()["avatar_url"] == url
+    for bad in ("https://evil.example/x.jpg", "http://bucket.s3.ap-northeast-2.amazonaws.com/records/" + "a" * 32 + ".jpg",
+                "https://bucket.s3.ap-northeast-2.amazonaws.com/records/../x.jpg"):
+        r = client.put(f"/api/rooms/{room['code']}/avatar", json={"avatar_url": bad}, headers=auth(room))
+        assert r.status_code == 422, bad
+    # 비우면 기본 사진으로
+    assert client.put(f"/api/rooms/{room['code']}/avatar", json={"avatar_url": None}, headers=auth(room)).json() == {"avatar_url": None}
+    assert client.put(f"/api/rooms/{room['code']}/avatar", json={"avatar_url": url}).status_code == 403
+
+
+def test_public_list_shows_profile(room):
+    client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=auth(room))
+    make_public(room)
+    client.put(f"/api/rooms/{room['code']}/bio", json={"bio": "책 좋아함"}, headers=auth(room))
+    listed = client.get("/api/rooms").json()[0]
+    assert listed["bio"] == "책 좋아함" and listed["avatar_url"] is None

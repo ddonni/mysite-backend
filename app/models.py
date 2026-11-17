@@ -37,6 +37,11 @@ class Room(Base):
     # 꺼져 있어도 코드를 아는 사람은 지금처럼 들어올 수 있음(목록에만 안 뜸).
     # 처음엔 다들 비공개 — 모르는 사이에 남들 목록에 뜨지 않게.
     is_public = Column(Boolean, nullable=False, default=False, server_default=false())
+    # 프로필 — 첫 화면 위 줄(이름 왼쪽)과 기록 둘러보기 카드에 보임. 이름처럼 코드만 있으면
+    # 누구나 볼 수 있는 값. 사진은 POST .../uploads로 올린 우리 S3 주소만(schemas.RoomAvatarIn),
+    # 없으면 NULL(프론트가 기본 실루엣). bio는 기록을 소개하는 한 줄(최대 40자).
+    avatar_url = Column(String, nullable=True)
+    bio = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     pages = relationship("Page", back_populates="room", cascade="all, delete-orphan")

@@ -55,6 +55,20 @@ def set_name(db: Session, room: models.Room, name: str) -> models.Room:
     return room
 
 
+def set_bio(db: Session, room: models.Room, bio: str) -> models.Room:
+    room.bio = bio or None
+    db.commit()
+    db.refresh(room)
+    return room
+
+
+def set_avatar(db: Session, room: models.Room, avatar_url: Optional[str]) -> models.Room:
+    room.avatar_url = avatar_url
+    db.commit()
+    db.refresh(room)
+    return room
+
+
 def set_public(db: Session, room: models.Room, public: bool) -> models.Room:
     room.is_public = public
     db.commit()
@@ -105,7 +119,8 @@ def list_public_rooms(db: Session) -> List[dict]:
     out = []
     for room in rooms[:PUBLIC_ROOMS_LIMIT]:
         counts = {cat: stats[room.id]["counts"].get(cat, 0) for cat in ("book", "anime", "movie", "music")}
-        out.append({"code": room.code, "name": room.name, "theme": room.theme, "counts": counts, "total": sum(counts.values())})
+        out.append({"code": room.code, "name": room.name, "theme": room.theme, "avatar_url": room.avatar_url,
+                    "bio": room.bio, "counts": counts, "total": sum(counts.values())})
     return out
 
 

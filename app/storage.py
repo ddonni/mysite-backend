@@ -36,6 +36,11 @@ def _get_client():
     return _client
 
 
+def uploaded_url_prefix() -> str:
+    """upload_photo가 돌려주는 주소의 앞부분 — 프로필 사진처럼 "우리가 올린 사진만" 받을 때 비교용."""
+    return f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/records/"
+
+
 async def upload_photo(file: UploadFile) -> str:
     ext = ALLOWED_TYPES.get(file.content_type, ".jpg")
     key = f"records/{uuid.uuid4().hex}{ext}"
