@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from . import crud, google_auth, models, schemas, search_routes, storage
+from . import crud, google_auth, models, schemas, search_routes, social_routes, storage
 from .database import Base, SessionLocal, engine, get_db
 from .migrations import run_startup_migrations
 from .ratelimit import check_rate_limit
@@ -47,6 +47,7 @@ app.add_middleware(
 
 # 새 기록 창의 외부 검색(책·음악·영화·애니)과 표지 중계 — search_routes.py.
 app.include_router(search_routes.router)
+app.include_router(social_routes.router)
 
 
 class ConnectionManager:

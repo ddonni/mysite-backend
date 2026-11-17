@@ -14,6 +14,7 @@ from sqlalchemy.exc import OperationalError
 from app.database import Base, engine, get_db
 from app import models, storage
 from app.database import SessionLocal
+from app.social_routes import _guestbook_posts
 from app.main import FEEDBACK_LIMIT, ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW, _feedback_posts, _room_creations, app
 from app.search_routes import (
     SEARCH_CACHES, BOOK_SEARCH_LIMIT, MUSIC_SEARCH_LIMIT, SCREEN_SEARCH_LIMIT, _book_searches, _music_searches, _screen_searches,
@@ -35,6 +36,7 @@ def fresh_database():
     # reasoning as resetting the database.
     _room_creations.clear()
     _feedback_posts.clear()
+    _guestbook_posts.clear()
     _book_searches.clear()
     _music_searches.clear()
     _screen_searches.clear()
@@ -1687,3 +1689,101 @@ def test_public_list_shows_profile(room):
     client.put(f"/api/rooms/{room['code']}/bio", json={"bio": "책 좋아함"}, headers=auth(room))
     listed = client.get("/api/rooms").json()[0]
     assert listed["bio"] == "책 좋아함" and listed["avatar_url"] is None
+
+
+# --- 방명록 · 좋아요 ---
+
+
+def actor(r):
+    return {"X-Actor-Code": r["code"], "X-Actor-Token": r["token"]}
+
+
+def give_google(r, sub="g-1"):
+    db = SessionLocal()
+    try:
+        row = db.query(models.Room).filter(models.Room.code == r["code"]).one()
+        row.google_sub = sub
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def visitor():
+    v = client.post("/api/rooms").json()
+    give_google(v, "g-visitor")
+    return v
+
+
+def test_guestbook_needs_login_then_google(room):
+    url = f"/api/rooms/{room['code']}/guestbook"
+    assert client.post(url, json={"message": "안녕"}).json()["detail"] == "login_required"
+    stranger = client.post("/api/rooms").json()
+    resp = client.post(url, json={"message": "안녕"}, headers=actor(stranger))
+    assert resp.status_code == 403 and resp.json()["detail"] == "google_required"
+    wrong = {"X-Actor-Code": stranger["code"], "X-Actor-Token": "nope"}
+    assert client.post(url, json={"message": "안녕"}, headers=wrong).status_code == 401
+
+
+def test_guestbook_post_and_list_shows_author(room, visitor):
+    client.put(f"/api/rooms/{visitor['code']}/name", json={"name": "민지"}, headers=auth(visitor))
+    url = f"/api/rooms/{room['code']}/guestbook"
+    resp = client.post(url, json={"message": "  놀러 왔어요  "}, headers=actor(visitor))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["message"] == "놀러 왔어요" and body["mine"] is True and body["can_delete"] is True
+    assert body["author"]["name"] == "민지"
+    listed = client.get(url).json()
+    assert listed["total"] == 1
+    assert listed["entries"][0]["author"]["code"] == visitor["code"]
+    assert listed["entries"][0]["mine"] is False and listed["entries"][0]["can_delete"] is False
+
+
+def test_guestbook_rejects_blank_and_too_long(room, visitor):
+    url = f"/api/rooms/{room['code']}/guestbook"
+    assert client.post(url, json={"message": "   "}, headers=actor(visitor)).status_code == 422
+    assert client.post(url, json={"message": "가" * 301}, headers=actor(visitor)).status_code == 422
+
+
+def test_anonymous_entry_hides_author_except_to_writer(room, visitor):
+    url = f"/api/rooms/{room['code']}/guestbook"
+    client.post(url, json={"message": "비밀", "anonymous": True}, headers=actor(visitor))
+    assert client.get(url).json()["entries"][0]["author"] is None
+    assert client.get(url, headers=actor(room)).json()["entries"][0]["author"] is None
+    mine = client.get(url, headers=actor(visitor)).json()["entries"][0]
+    assert mine["author"]["code"] == visitor["code"] and mine["anonymous"] is True
+
+
+def test_guestbook_delete_by_writer_or_owner_only(room, visitor):
+    url = f"/api/rooms/{room['code']}/guestbook"
+    a = client.post(url, json={"message": "하나"}, headers=actor(visitor)).json()["id"]
+    b = client.post(url, json={"message": "둘"}, headers=actor(visitor)).json()["id"]
+    other = client.post("/api/rooms").json()
+    assert client.delete(f"{url}/{a}", headers=actor(other)).status_code == 403
+    assert client.delete(f"{url}/{a}", headers=actor(visitor)).status_code == 200
+    # 방 주인은 구글 연결 없이도 자기 방명록 글을 지울 수 있음
+    owner_view = client.get(url, headers=actor(room)).json()["entries"][0]
+    assert owner_view["can_delete"] is True
+    assert client.delete(f"{url}/{b}", headers=actor(room)).status_code == 200
+    assert client.get(url).json()["total"] == 0
+    assert client.delete(f"{url}/{b}", headers=actor(room)).status_code == 404
+
+
+def test_likes_toggle_and_count(room, visitor):
+    url = f"/api/rooms/{room['code']}/likes"
+    assert client.get(url).json() == {"count": 0, "liked": False}
+    assert client.put(url, headers=actor(visitor)).json() == {"count": 1, "liked": True}
+    assert client.put(url, headers=actor(visitor)).json() == {"count": 1, "liked": True}  # 두 번 눌러도 하나
+    assert client.get(url, headers=actor(visitor)).json() == {"count": 1, "liked": True}
+    assert client.get(url).json() == {"count": 1, "liked": False}
+    assert client.delete(url, headers=actor(visitor)).json() == {"count": 0, "liked": False}
+
+
+def test_likes_need_google_and_not_own_room(room, visitor):
+    url = f"/api/rooms/{room['code']}/likes"
+    assert client.put(url).status_code == 401
+    stranger = client.post("/api/rooms").json()
+    assert client.put(url, headers=actor(stranger)).json()["detail"] == "google_required"
+    give_google(room, "g-owner")
+    resp = client.put(url, headers=actor(room))
+    assert resp.status_code == 400 and resp.json()["detail"] == "own_room"

@@ -290,6 +290,42 @@ class UploadOut(BaseModel):
     url: str
 
 
+class GuestbookIn(BaseModel):
+    """POST .../guestbook — 앞뒤 공백을 자른 뒤 1~300자. anonymous면 남에게 이름·사진을 숨김."""
+
+    message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
+    anonymous: bool = False
+
+
+class GuestbookAuthor(BaseModel):
+    code: str
+    name: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+
+class GuestbookOut(BaseModel):
+    """방명록 글 하나. author는 익명 글이면(쓴 본인이 아닌 한) null. mine = 내가 쓴 글,
+    can_delete = 내가 지울 수 있음(글쓴이 본인 또는 방 주인)."""
+
+    id: int
+    message: str
+    anonymous: bool
+    created_at: Optional[datetime] = None
+    author: Optional[GuestbookAuthor] = None
+    mine: bool = False
+    can_delete: bool = False
+
+
+class GuestbookListOut(BaseModel):
+    total: int
+    entries: List[GuestbookOut]
+
+
+class LikesOut(BaseModel):
+    count: int
+    liked: bool
+
+
 class FeedbackIn(BaseModel):
     """POST /api/feedback — 앞뒤 공백을 자른 뒤 내용은 1~1000자, 이름은
     30자까지(빈 문자열이면 이름 없음). page는 보낸 화면의 경로(예:

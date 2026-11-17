@@ -84,6 +84,34 @@ class Record(Base):
     room = relationship("Room", back_populates="records")
 
 
+class GuestbookEntry(Base):
+    """방명록 글 하나 — room(방명록이 있는 방)에 author_room(쓴 사람의 방)이 남김.
+    익명이어도 author_room_id는 저장함(본인·방 주인이 지울 수 있게). app/social_routes.py."""
+
+    __tablename__ = "guestbook_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
+    author_room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
+    message = Column(String, nullable=False)
+    anonymous = Column(Boolean, nullable=False, default=False, server_default=false())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    author = relationship("Room", foreign_keys=[author_room_id])
+
+
+class RoomLike(Base):
+    """좋아요 하나 — liker_room(누른 사람의 방)이 room에. 한 방에 한 번만(유니크)."""
+
+    __tablename__ = "room_likes"
+    __table_args__ = (UniqueConstraint("room_id", "liker_room_id", name="uq_room_likes_room_liker"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
+    liker_room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Feedback(Base):
     """사이트 어디서나 "의견 보내기"로 받은 피드백 한 건. 방과 달리 누구나
     (토큰 없이) 보낼 수 있고, 로그인이 없으니 누가 보냈는지는 본인이 적은
