@@ -40,6 +40,32 @@
   그 방 자신의 후보로만 쓰임. 두 칸은 서로 독립 — 제목 후보가 만든 사람을
   알려주지 않음(동명의 다른 작품이 흔하고, 만든 사람을 모르고 기록하는 경우도
   많아서). `field`는 이 둘만 허용(감상 같은 개인적인 칸은 422). 규칙은 `crud.suggestions`.
+- **프로필**(2026-11-17): `rooms.avatar_url`·`rooms.bio`. `PUT .../bio`(앞뒤 공백 자르고 40자, 빈
+  값이면 지움), `PUT .../avatar`(`POST .../uploads`가 돌려준 **우리 버킷 주소만** —
+  `storage.uploaded_url_prefix()` + uuid 키, null이면 기본 실루엣). 둘 다 `GET /api/rooms/{code}`와
+  `GET /api/rooms` 응답에 실림.
+- **방명록·좋아요**(2026-11-17, `app/social_routes.py`): 로그인이 없어서 "누가"는 **보내는 사람 자신의
+  방**으로 정함 — 요청에 `X-Actor-Code`/`X-Actor-Token`(그 방의 code/token). 헤더가 없거나 틀리면
+  401 `"login_required"`, 그 방에 구글 계정이 연결 안 돼 있으면 403 `"google_required"`(장난 글을
+  줄이려고 사용자가 정함).
+  - 방명록 `GET/POST .../guestbook`(1~300자, `anonymous` 선택, IP당 한 시간 60개), `DELETE
+    .../guestbook/{id}`(글쓴이 또는 방 주인만, 아니면 403 `"not_allowed"`). 익명 글도 쓴 방은
+    저장함(지우기용) — 남에게만 `author`를 숨김. **방 주인은 자기 방명록에 구글 연결 없이** 씀,
+    응답의 `by_owner`로 프론트가 "주인" 표시.
+  - 방 좋아요 `GET/PUT/DELETE .../likes` → `{count, liked}`, 자기 방엔 400 `"own_room"`.
+  - 카드 공감 `PUT/DELETE .../records/{id}/likes`(같은 규칙). 기록 목록 GET에 `X-Actor-*`를 주면
+    카드마다 `likes`·`liked`가 붙음(`attach_record_likes` — DB 칸이 아니라 응답용). 기록을 지우면
+    공감도 같이 지움.
+  - `GET /api/rooms?sort=popular`는 방 좋아요 많은 순(같으면 최근 활동순), 방마다 `likes`와 인생작
+    최대 12개(`featured` — 책·애니·영화·음악 순)가 실림.
+- **티어리스트**(2026-11-17): `records.tier`("SS"…"F", 미배치로 직접 뺐으면 "-")·`records.tier_pos`
+  (줄 안 순서). NULL이면 직접 놓지 않은 것 — 프론트가 별점으로 자동 배치. `PUT .../tierlist`
+  `{items:[{id, tier, pos}]}`(방 주인만, 이 방 기록만 바꾸고 바꾼 수를 돌려줌, tier null이면 자동으로
+  되돌림). 기록 수정(PUT)은 티어를 안 건드림.
+- **세부 기록·보는 중**(2026-11-17): `records.details` JSON `{scores:{요소:별점}, genres:[...]}` —
+  카테고리마다 받는 요소·장르는 `schemas.DETAIL_ASPECTS`·`DETAIL_GENRES`(프론트
+  `js/library/modal/detailFields.js`와 같아야 함). 별점은 0.5~5의 0.5 단위, 장르 최대 5개, 음악·빈 값은
+  null. `records.in_progress`(보는 중·읽는 중) — 음악이면 늘 false.
 - `Page`/`Record`는 둘 다 `room_id`를 가지며, `Page`의
   `(room_id, page_number)`가 유니크 — 방마다 자기만의 1..count
   페이지 번호 체계를 가짐(예전엔 `page_number` 전역 유니크였음).
@@ -99,6 +125,18 @@
 
 ## 빌드/테스트 명령
 
+새 마이그레이션은 push 전에 **운영과 같은 Postgres에서** 확인하는 게 안전함(SQLite로는 옛 리비전이
+안 돌아감 — `ALTER COLUMN` 등 Postgres 전용). 학원 PC에선 임시 폴더의 DB 드라이버 DLL을 보안 정책이
+막아서 Docker 안에서 돌렸음(2026-11-17):
+```bash
+docker network create mignet
+docker run -d --rm --name mig-check --network mignet -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=mig postgres:18
+docker run --rm --network mignet -v "<mysite-backend 경로>:/src:ro" python:3.13-slim bash -c \
+  "cp -r /src /app && cd /app && pip install -q -r requirements.txt && \
+   DATABASE_URL=postgresql+psycopg2://postgres:pw@mig-check:5432/mig alembic upgrade head"
+```
+운영이 지금 있는 리비전까지 먼저 올리고 데이터를 넣은 뒤 head로 올려 보면 실제 배포와 같음.
+
 ```bash
 docker compose up --build          # 로컬 실행 (API: localhost:8000, 문서: /docs)
 pip install -r requirements-dev.txt && pytest -q   # 테스트
@@ -123,9 +161,10 @@ DATABASE_URL=postgresql+psycopg2://sketchbook:sketchbook@localhost:5432/sketchbo
 app/
   main.py       # FastAPI 앱, CORS, WebSocket ConnectionManager, 방·그림·기록·구글·업로드 라우트
   search_routes.py # 외부 검색 라우트(책·음악·영화·애니·표지 중계) + 그 횟수 한도 — main.py가 include
+  social_routes.py # 방명록·방 좋아요·카드 공감(X-Actor-* 헤더, 구글 연결 확인) — main.py가 include
   ratelimit.py  # IP별 횟수 제한(client_ip, check_rate_limit) — 방 생성·피드백·검색이 같이 씀
   cache.py      # 검색 결과 메모리 캐시(TTLCache) — search_routes.py가 책·음악·영화 검색에 10분씩
-  models.py     # SQLAlchemy 모델 (Room, Page, Record, Feedback)
+  models.py     # SQLAlchemy 모델 (Room, Page, Record, GuestbookEntry, RoomLike, RecordLike, Feedback)
   schemas.py    # Pydantic 스키마
   crud.py       # DB 접근 로직, 방 코드/토큰 생성
   storage.py    # S3 사진 업로드
@@ -157,7 +196,8 @@ tests/test_api.py
   `"room not found"`, 토큰이 없거나 틀리면 403 `"not room owner"`,
   인생작(`PUT .../records/{id}/feature`)을 한 카테고리에 3개 넘게 켜려고
   하면 400 `"featured_limit"`, 음악이 아닌 기록을 턴테이블에 올리려고
-  하면(`PUT .../records/{id}/playing`) 400 `"not_music"`. 업로드(`POST .../uploads`)는 이미지 형식이
+  하면(`PUT .../records/{id}/playing`) 400 `"not_music"`. 방명록·좋아요(`social_routes.py`)는
+  401 `"login_required"`·403 `"google_required"`·400 `"own_room"`·403 `"not_allowed"`(위 "방명록·좋아요"). 업로드(`POST .../uploads`)는 이미지 형식이
   아니면(SVG 포함) 415 `"unsupported file type"`, 10MB를 넘으면 413
   `"file too large"`(프론트는 지금 이 둘을 일반 저장 실패로만 안내함).
   피드백(`POST /api/feedback`)이 IP당 한 시간 60개를 넘으면 429
@@ -184,7 +224,8 @@ tests/test_api.py
   주소(`https://ddonni.github.io`)로 좁혀져 있음.
 - `POST /api/feedback`(토큰 없이 누구나)은 사이트의 "의견 보내기"를 `feedback`
   테이블에 저장만 함 — `message`(1~1000자), `name`(선택, 30자), 맥락용 `page`·`room_code`.
-  **읽는 API는 일부러 없음**(관리자 인증을 따로 만들지 않으려고). 운영 서버에서 이렇게 봄:
+  읽는 건 관리자 페이지(프론트 `admin.html`) → `GET /api/admin/feedback`(구글 ID 토큰의 이메일이 환경
+  변수 `ADMIN_EMAILS`에 있어야 함, 비어 있으면 아무도 못 봄). 서버에서 직접 볼 땐:
   ```bash
   sudo -u postgres psql -d mysite -c "SELECT id, created_at AT TIME ZONE 'Asia/Seoul' AS kst, name, page, room_code, message FROM feedback ORDER BY id DESC LIMIT 20;"
   ```
