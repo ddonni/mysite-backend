@@ -1886,3 +1886,24 @@ def test_owner_writes_own_guestbook_without_google(room):
     # 남의 방명록엔 여전히 구글 연동이 필요함
     other = client.post("/api/rooms").json()
     assert client.post(f"/api/rooms/{other['code']}/guestbook", json={"message": "hi"}, headers=actor(room)).status_code == 403
+
+
+def test_record_details_per_category(room):
+    body = make_record(cat="anime", details={"scores": {"story": 4.5, "art": 5}, "genres": ["판타지", "액션", "판타지"]})
+    got = client.post(f"/api/rooms/{room['code']}/records", json=body, headers=auth(room)).json()["details"]
+    assert got == {"scores": {"story": 4.5, "art": 5}, "genres": ["판타지", "액션"]}
+    # 음악은 세부 기록을 안 받음, 빈 세부 기록은 null
+    music = make_record(cat="music", details={"scores": {"story": 3}})
+    assert client.post(f"/api/rooms/{room['code']}/records", json=music, headers=auth(room)).json()["details"] is None
+    empty = make_record(details={"scores": {}, "genres": []})
+    assert client.post(f"/api/rooms/{room['code']}/records", json=empty, headers=auth(room)).json()["details"] is None
+
+
+def test_record_details_reject_wrong_values(room):
+    url = f"/api/rooms/{room['code']}/records"
+    for details in ({"scores": {"art": 4}},                # 책엔 작화 없음
+                    {"scores": {"ending": 4.2}},           # 0.5 단위만
+                    {"scores": {"ending": 6}},
+                    {"genres": ["이세계"]},                # 책 장르가 아님
+                    {"genres": ["소설", "에세이", "시", "인문", "역사", "과학"]}):  # 5개 넘음
+        assert client.post(url, json=make_record(details=details), headers=auth(room)).status_code == 422, details

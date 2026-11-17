@@ -79,6 +79,9 @@ class Record(Base):
     # 고르면 앨범 재생목록 + 몇 번째 곡(music_search.listen_url), 직접 붙여 넣으면 영상 주소.
     # 프론트는 유튜브 임베드 플레이어로 틂(js/shared/youtube.js). 없으면 NULL.
     listen_url = Column(String, nullable=True)
+    # 세부 기록(선택, 2026-11-17) — {"scores": {"story": 4.5, ...}, "genres": ["판타지", ...]}.
+    # 카테고리마다 받는 칸이 다름(schemas.DETAIL_ASPECTS·DETAIL_GENRES). 음악은 없음. 안 썼으면 NULL.
+    details = Column(JSON, nullable=True)
     # 티어리스트(2026-11-17) — 방 주인이 직접 놓은 줄("SS"…"F", 미배치로 뺐으면 "-")과 그 줄 안의
     # 순서. NULL이면 직접 놓지 않은 것 — 프론트가 별점으로 자동 배치함(js/tier/board.js의 tierFromRating).
     tier = Column(String, nullable=True)

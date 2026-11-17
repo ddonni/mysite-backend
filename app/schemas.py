@@ -4,7 +4,7 @@ from typing import Annotated, Dict, List, Literal, Optional
 
 from urllib.parse import parse_qs, urlparse
 
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 from . import storage
 
@@ -248,6 +248,35 @@ def is_youtube_url(url: str) -> bool:
     return any(_YOUTUBE_ID.match(i or "") for i in ids)
 
 
+# 세부 기록에서 카테고리마다 받는 요소별 별점과 장르 — 프론트 js/library/modal/detailFields.js와 같아야 함.
+DETAIL_ASPECTS = {
+    "anime": ("novelty", "story", "art", "character", "ending"),
+    "movie": ("story", "acting", "visual", "music", "ending"),
+    "book": ("ending",),
+}
+DETAIL_GENRES = {
+    "anime": ("액션", "판타지", "이세계", "로맨스", "일상", "코미디", "SF", "미스터리", "스포츠", "드라마", "공포", "학원"),
+    "movie": ("액션", "드라마", "로맨스", "코미디", "스릴러", "범죄", "SF", "판타지", "공포", "미스터리", "애니메이션", "다큐"),
+    "book": ("소설", "에세이", "시", "인문", "역사", "과학", "자기계발", "경제", "만화", "판타지", "추리", "로맨스"),
+}
+GENRES_MAX = 5
+
+
+class RecordDetails(BaseModel):
+    """세부 기록 — scores는 요소 → 별점(0.5~5, 0.5 단위), genres는 고른 장르(최대 GENRES_MAX개).
+    카테고리에 맞는지는 RecordIn이 거름(모르는 요소·장르는 422)."""
+
+    scores: Dict[str, float] = {}
+    genres: List[str] = []
+
+    @field_validator("scores")
+    @classmethod
+    def _half_stars(cls, v: Dict[str, float]) -> Dict[str, float]:
+        for key, score in v.items():
+            if not (0.5 <= score <= 5) or (score * 2) != int(score * 2):
+                raise ValueError(f"score for {key} must be 0.5..5 in 0.5 steps")
+        return v
+
 
 class RecordIn(BaseModel):
     """One 'watched/read it' log entry. photo_url comes from POST
@@ -263,6 +292,24 @@ class RecordIn(BaseModel):
     memo: Optional[str] = None
     photo_url: Optional[str] = None
     listen_url: Optional[str] = None
+    details: Optional[RecordDetails] = None
+
+    @model_validator(mode="after")
+    def _details_for_category(self) -> "RecordIn":
+        # 음악(또는 비운 세부 기록)은 저장하지 않음. 그 밖엔 이 카테고리의 요소·장르만 받음.
+        d = self.details
+        if d is None or self.cat not in DETAIL_ASPECTS or (not d.scores and not d.genres):
+            self.details = None
+            return self
+        bad = [k for k in d.scores if k not in DETAIL_ASPECTS[self.cat]]
+        bad += [g for g in d.genres if g not in DETAIL_GENRES[self.cat]]
+        if bad:
+            raise ValueError(f"unknown detail for {self.cat}: {bad}")
+        genres = list(dict.fromkeys(d.genres))
+        if len(genres) > GENRES_MAX:
+            raise ValueError(f"at most {GENRES_MAX} genres")
+        self.details = RecordDetails(scores=d.scores, genres=genres)
+        return self
 
     @field_validator("listen_url")
     @classmethod
