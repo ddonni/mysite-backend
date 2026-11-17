@@ -1907,3 +1907,15 @@ def test_record_details_reject_wrong_values(room):
                     {"genres": ["이세계"]},                # 책 장르가 아님
                     {"genres": ["소설", "에세이", "시", "인문", "역사", "과학"]}):  # 5개 넘음
         assert client.post(url, json=make_record(details=details), headers=auth(room)).status_code == 422, details
+
+
+def test_in_progress_saved_except_music(room):
+    url = f"/api/rooms/{room['code']}/records"
+    book = client.post(url, json=make_record(in_progress=True), headers=auth(room)).json()
+    assert book["in_progress"] is True
+    assert client.post(url, json=make_record(), headers=auth(room)).json()["in_progress"] is False
+    music = client.post(url, json=make_record(cat="music", in_progress=True), headers=auth(room)).json()
+    assert music["in_progress"] is False
+    # 다 봤으면 끔
+    done = client.put(f"{url}/{book['id']}", json=make_record(in_progress=False), headers=auth(room)).json()
+    assert done["in_progress"] is False

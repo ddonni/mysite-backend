@@ -79,6 +79,8 @@ class Record(Base):
     # 고르면 앨범 재생목록 + 몇 번째 곡(music_search.listen_url), 직접 붙여 넣으면 영상 주소.
     # 프론트는 유튜브 임베드 플레이어로 틂(js/shared/youtube.js). 없으면 NULL.
     listen_url = Column(String, nullable=True)
+    # 보는 중·읽는 중(2026-11-17) — 아직 다 안 본 작품. 음악은 없음(늘 False).
+    in_progress = Column(Boolean, nullable=False, default=False, server_default=false())
     # 세부 기록(선택, 2026-11-17) — {"scores": {"story": 4.5, ...}, "genres": ["판타지", ...]}.
     # 카테고리마다 받는 칸이 다름(schemas.DETAIL_ASPECTS·DETAIL_GENRES). 음악은 없음. 안 썼으면 NULL.
     details = Column(JSON, nullable=True)

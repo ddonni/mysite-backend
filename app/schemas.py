@@ -293,9 +293,13 @@ class RecordIn(BaseModel):
     photo_url: Optional[str] = None
     listen_url: Optional[str] = None
     details: Optional[RecordDetails] = None
+    # 보는 중·읽는 중 — 음악엔 없어서 음악이면 늘 False로 저장.
+    in_progress: bool = False
 
     @model_validator(mode="after")
     def _details_for_category(self) -> "RecordIn":
+        if self.cat == "music":
+            self.in_progress = False
         # 음악(또는 비운 세부 기록)은 저장하지 않음. 그 밖엔 이 카테고리의 요소·장르만 받음.
         d = self.details
         if d is None or self.cat not in DETAIL_ASPECTS or (not d.scores and not d.genres):
