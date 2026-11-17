@@ -125,11 +125,26 @@ def list_public_rooms(db: Session, sort: str = "recent") -> List[dict]:
     )
     if sort == "popular":
         rooms.sort(key=lambda r: likes.get(r.id, 0), reverse=True)
+    shown = rooms[:PUBLIC_ROOMS_LIMIT]
+    # 인생작 — 카테고리 순서(책·애니·영화·음악), 같은 카테고리 안에선 최근 것부터, 방마다 최대 12개.
+    cat_order = {c: i for i, c in enumerate(("book", "anime", "movie", "music"))}
+    featured: Dict[int, list] = {}
+    rows = (
+        db.query(models.Record)
+        .filter(models.Record.room_id.in_([r.id for r in shown]), models.Record.featured.is_(True))
+        .order_by(models.Record.date.desc(), models.Record.id.desc())
+        .all()
+    ) if shown else []
+    for rec in sorted(rows, key=lambda r: cat_order.get(r.cat, 9)):
+        lst = featured.setdefault(rec.room_id, [])
+        if len(lst) < 12:
+            lst.append({"id": rec.id, "cat": rec.cat, "title": rec.title, "photo_url": rec.photo_url})
     out = []
-    for room in rooms[:PUBLIC_ROOMS_LIMIT]:
+    for room in shown:
         counts = {cat: stats[room.id]["counts"].get(cat, 0) for cat in ("book", "anime", "movie", "music")}
         out.append({"code": room.code, "name": room.name, "theme": room.theme, "avatar_url": room.avatar_url,
-                    "bio": room.bio, "likes": likes.get(room.id, 0), "counts": counts, "total": sum(counts.values())})
+                    "bio": room.bio, "likes": likes.get(room.id, 0), "featured": featured.get(room.id, []),
+                    "counts": counts, "total": sum(counts.values())})
     return out
 
 

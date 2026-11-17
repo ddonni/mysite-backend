@@ -68,6 +68,13 @@ class RoomVisibilityIn(BaseModel):
     public: bool
 
 
+class FeaturedWork(BaseModel):
+    id: int
+    cat: str
+    title: str
+    photo_url: Optional[str] = None
+
+
 class PublicRoomOut(BaseModel):
     """GET /api/rooms 목록의 방 하나 — 누구나 볼 수 있는 값만(토큰·구글
     계정 정보는 절대 안 넣음). counts는 카테고리별 기록 수(없으면 0)."""
@@ -78,6 +85,8 @@ class PublicRoomOut(BaseModel):
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
     likes: int = 0
+    # 인생작(카테고리마다 최대 3개 × 4) — 카드에 작은 표지로.
+    featured: List["FeaturedWork"] = []
     counts: Dict[str, int]
     total: int
 

@@ -1860,3 +1860,19 @@ def test_editing_a_record_keeps_its_tier(room):
     client.put(f"/api/rooms/{room['code']}/tierlist", json={"items": [{"id": rid, "tier": "A", "pos": 2}]}, headers=auth(room))
     resp = client.put(f"/api/rooms/{room['code']}/records/{rid}", json=make_record(rating=5), headers=auth(room))
     assert resp.json()["tier"] == "A" and resp.json()["tier_pos"] == 2
+
+
+# --- 둘러보기 인생작 · 주인 방명록 · 세부 기록 ---
+
+
+def test_public_list_shows_up_to_twelve_featured(room):
+    for cat in ("book", "anime", "movie", "music"):
+        for i in range(3):
+            rid = client.post(f"/api/rooms/{room['code']}/records", json=make_record(cat=cat, title=f"{cat}{i}"), headers=auth(room)).json()["id"]
+            _feature(room, rid)
+    client.post(f"/api/rooms/{room['code']}/records", json=make_record(title="평범"), headers=auth(room))
+    make_public(room)
+    featured = client.get("/api/rooms").json()[0]["featured"]
+    assert len(featured) == 12
+    assert [f["cat"] for f in featured[:3]] == ["book"] * 3 and featured[-1]["cat"] == "music"
+    assert "평범" not in [f["title"] for f in featured]
