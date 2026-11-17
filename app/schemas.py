@@ -239,6 +239,7 @@ def is_youtube_url(url: str) -> bool:
     return any(_YOUTUBE_ID.match(i or "") for i in ids)
 
 
+
 class RecordIn(BaseModel):
     """One 'watched/read it' log entry. photo_url comes from POST
     /api/uploads — the client uploads the photo first, then sends the
@@ -271,9 +272,30 @@ class RecordOut(RecordIn):
     date: str
     featured: bool = False
     playing: bool = False
+    # 티어리스트에 직접 놓은 줄과 순서(없으면 null — 별점으로 자동 배치).
+    tier: Optional[str] = None
+    tier_pos: Optional[int] = None
     # 카드 공감 — likes는 받은 수, liked는 요청한 사람(X-Actor-*)이 눌렀는지. 목록 GET에서만 채움.
     likes: int = 0
     liked: bool = False
+
+
+TIERS = ("SS", "S", "A", "B", "C", "D", "F", "-")
+
+
+class TierPlacement(BaseModel):
+    """티어리스트에 놓은 기록 하나. tier가 null이면 "별점으로 자동"으로 되돌림(pos도 지움).
+    "-"는 미배치 칸에 직접 놓은 것."""
+
+    id: int
+    tier: Optional[Literal[TIERS]] = None
+    pos: Optional[int] = Field(default=None, ge=0, le=100000)
+
+
+class TierListIn(BaseModel):
+    """PUT .../tierlist — 옮길 때마다 바뀐 줄들의 기록을 한꺼번에 보냄(최대 2000개)."""
+
+    items: List[TierPlacement] = Field(max_length=2000)
 
 
 class RecordFeatureIn(BaseModel):

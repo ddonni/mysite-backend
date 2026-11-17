@@ -389,6 +389,25 @@ def set_playing(db: Session, room_id: int, record_id: int, playing: bool) -> Opt
     return record
 
 
+def save_tierlist(db: Session, room_id: int, items: list) -> int:
+    """티어리스트 배치 저장 — 이 방의 기록만 바꾸고(남의 방 기록 id는 조용히 건너뜀), 바꾼 수를 돌려줌.
+    tier가 None이면 별점 자동 배치로 되돌림(순서도 지움)."""
+    by_id = {it.id: it for it in items}
+    if not by_id:
+        return 0
+    rows = (
+        db.query(models.Record)
+        .filter(models.Record.room_id == room_id, models.Record.id.in_(by_id.keys()))
+        .all()
+    )
+    for r in rows:
+        it = by_id[r.id]
+        r.tier = it.tier
+        r.tier_pos = it.pos if it.tier is not None else None
+    db.commit()
+    return len(rows)
+
+
 def delete_record(db: Session, room_id: int, record_id: int) -> bool:
     record = _get_record(db, room_id, record_id)
     if record is None:

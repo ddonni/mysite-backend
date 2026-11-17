@@ -79,6 +79,10 @@ class Record(Base):
     # 고르면 앨범 재생목록 + 몇 번째 곡(music_search.listen_url), 직접 붙여 넣으면 영상 주소.
     # 프론트는 유튜브 임베드 플레이어로 틂(js/shared/youtube.js). 없으면 NULL.
     listen_url = Column(String, nullable=True)
+    # 티어리스트(2026-11-17) — 방 주인이 직접 놓은 줄("SS"…"F", 미배치로 뺐으면 "-")과 그 줄 안의
+    # 순서. NULL이면 직접 놓지 않은 것 — 프론트가 별점으로 자동 배치함(js/tier/board.js의 tierFromRating).
+    tier = Column(String, nullable=True)
+    tier_pos = Column(Integer, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     room = relationship("Room", back_populates="records")

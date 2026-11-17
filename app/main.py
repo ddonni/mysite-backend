@@ -385,6 +385,12 @@ def update_record(record_id: int, body: schemas.RecordIn, room: models.Room = De
     return record
 
 
+@app.put("/api/rooms/{code}/tierlist")
+def save_tierlist(body: schemas.TierListIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
+    """티어리스트에서 옮긴 기록들의 줄·순서를 한꺼번에 저장(방 주인만)."""
+    return {"saved": crud.save_tierlist(db, room.id, body.items)}
+
+
 @app.put("/api/rooms/{code}/records/{record_id}/feature", response_model=schemas.RecordOut)
 def feature_record(record_id: int, body: schemas.RecordFeatureIn, room: models.Room = Depends(require_owner), db: Session = Depends(get_db)):
     try:

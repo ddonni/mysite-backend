@@ -1825,3 +1825,38 @@ def test_public_rooms_popular_sort(visitor):
     popular = client.get("/api/rooms", params={"sort": "popular"}).json()
     assert popular[0]["code"] == a["code"] and popular[0]["likes"] == 1
     assert client.get("/api/rooms", params={"sort": "weird"}).status_code == 422
+
+
+# --- 티어리스트 ---
+
+
+def test_tierlist_saves_placements_and_resets(room):
+    ids = [client.post(f"/api/rooms/{room['code']}/records", json=make_record(title=f"책{i}"), headers=auth(room)).json()["id"] for i in range(3)]
+    url = f"/api/rooms/{room['code']}/tierlist"
+    body = {"items": [{"id": ids[0], "tier": "SS", "pos": 0}, {"id": ids[1], "tier": "SS", "pos": 1}, {"id": ids[2], "tier": "-", "pos": 0}]}
+    assert client.put(url, json=body, headers=auth(room)).json() == {"saved": 3}
+    got = {r["id"]: (r["tier"], r["tier_pos"]) for r in client.get(f"/api/rooms/{room['code']}/records").json()}
+    assert got == {ids[0]: ("SS", 0), ids[1]: ("SS", 1), ids[2]: ("-", 0)}
+    # 별점으로 되돌리기 — tier null이면 순서도 지움
+    client.put(url, json={"items": [{"id": ids[0], "tier": None, "pos": 5}]}, headers=auth(room))
+    r0 = next(r for r in client.get(f"/api/rooms/{room['code']}/records").json() if r["id"] == ids[0])
+    assert r0["tier"] is None and r0["tier_pos"] is None
+
+
+def test_tierlist_owner_only_valid_tiers_and_own_records(room):
+    rid = client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=auth(room)).json()["id"]
+    url = f"/api/rooms/{room['code']}/tierlist"
+    assert client.put(url, json={"items": [{"id": rid, "tier": "S", "pos": 0}]}).status_code == 403
+    assert client.put(url, json={"items": [{"id": rid, "tier": "Z", "pos": 0}]}, headers=auth(room)).status_code == 422
+    other = client.post("/api/rooms").json()
+    oid = client.post(f"/api/rooms/{other['code']}/records", json=make_record(), headers=auth(other)).json()["id"]
+    # 남의 방 기록 id는 건너뜀
+    assert client.put(url, json={"items": [{"id": oid, "tier": "S", "pos": 0}]}, headers=auth(room)).json() == {"saved": 0}
+    assert client.get(f"/api/rooms/{other['code']}/records").json()[0]["tier"] is None
+
+
+def test_editing_a_record_keeps_its_tier(room):
+    rid = client.post(f"/api/rooms/{room['code']}/records", json=make_record(), headers=auth(room)).json()["id"]
+    client.put(f"/api/rooms/{room['code']}/tierlist", json={"items": [{"id": rid, "tier": "A", "pos": 2}]}, headers=auth(room))
+    resp = client.put(f"/api/rooms/{room['code']}/records/{rid}", json=make_record(rating=5), headers=auth(room))
+    assert resp.json()["tier"] == "A" and resp.json()["tier_pos"] == 2
