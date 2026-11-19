@@ -116,6 +116,17 @@ def _itunes(query: str) -> list:
     return resp.json().get("results") or []
 
 
+def _itunes_songs(query: str) -> list:
+    """노래 제목으로 찾기(search_title_songs)용 — 같은 제목의 곡이 많아서 넉넉히 받음."""
+    resp = requests.get(
+        ITUNES_URL,
+        params={"term": query, "country": "US", "entity": "song", "limit": TRACK_POOL},
+        timeout=TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json().get("results") or []
+
+
 def _squash(s: str) -> str:
     return re.sub(r"[\s\W_]+", "", s or "").lower()
 
@@ -154,6 +165,22 @@ def _same_artist(yt_artists: list, itunes_artist: str) -> bool:
 _ITUNES_KIND = re.compile(r"\s+-\s+(Single|EP)$")
 
 
+def _yt_album(artist: str, album: str) -> Optional[dict]:
+    """iTunes의 (가수, 앨범)과 같은 유튜브 뮤직 앨범 결과 — 한국어 이름·가수·커버·browseId를 얻으려고.
+    이름이 한쪽만 번역된 경우가 흔해서(가수 "The Black Skirts" ↔ "검정치마", 앨범 "Origin" ↔ "원래",
+    "Through the Night" ↔ "밤편지") 앨범·가수 둘 다 맞는 결과 → 가수가 맞는 첫 앨범 → 앨범 이름만
+    맞는 결과 순. 가수를 앨범 이름보다 먼저 봄 — "Through the Night"처럼 흔한 이름은 다른 가수의 같은
+    이름 앨범이 걸리지만, 검색어에 가수와 앨범을 같이 넣어서 그 가수의 첫 앨범은 대개 맞음."""
+    try:
+        albums = [r for r in _search(f"{artist} {album}", None) if r.get("resultType") == "album"]
+    except Exception:
+        return None
+    by_artist = lambda r: _same_artist(r.get("artists"), artist)
+    return (next((r for r in albums if _same(r.get("title"), album) and by_artist(r)), None)
+            or next((r for r in albums if by_artist(r)), None)
+            or next((r for r in albums if _same(r.get("title"), album)), None))
+
+
 def _song_album(query: str) -> Optional[dict]:
     """노래 제목(가수를 붙였을 수도 있음)이 실린 앨범 하나 — 못 찾으면 None."""
     if not _itunes_allowed():
@@ -169,19 +196,7 @@ def _song_album(query: str) -> Optional[dict]:
     album = _ITUNES_KIND.sub("", song["collectionName"])
     artist = song["artistName"]
     year = (song.get("releaseDate") or "")[:4]
-    # 유튜브 뮤직에서 같은 앨범의 한국어 이름·가수·커버. 이름이 한쪽만 번역된 경우가 흔해서
-    # (가수 "The Black Skirts" ↔ "검정치마", 앨범 "Origin" ↔ "원래", "Through the Night" ↔
-    # "밤편지") 앨범·가수 둘 다 맞는 결과 → 가수가 맞는 첫 앨범 → 앨범 이름만 맞는 결과 순.
-    # 가수를 앨범 이름보다 먼저 봄 — "Through the Night"처럼 흔한 이름은 다른 가수의 같은
-    # 이름 앨범이 걸리지만, 검색어에 가수와 앨범을 같이 넣어서 그 가수의 첫 앨범은 대개 맞음.
-    try:
-        albums = [r for r in _search(f"{artist} {album}", None) if r.get("resultType") == "album"]
-    except Exception:
-        albums = []
-    by_artist = lambda r: _same_artist(r.get("artists"), artist)
-    hit = (next((r for r in albums if _same(r.get("title"), album) and by_artist(r)), None)
-           or next((r for r in albums if by_artist(r)), None)
-           or next((r for r in albums if _same(r.get("title"), album)), None))
+    hit = _yt_album(artist, album)
     if hit:
         item = _to_item(hit)
         item["year"] = item["year"] or year
@@ -401,3 +416,112 @@ def search_artist_songs(query: str) -> List[dict]:
                 "album_id": r["browseId"],
             })
     return out[:SONGS_MAX_RESULTS]
+
+
+# --- 노래 제목으로 찾기(by=track, 2026-11-19) ---
+# 로그인 없는 유튜브 뮤직은 노래 검색을 안 해 줘서, 앨범 안의 수록곡은 그 가수 이름을 알아야만
+# 찾을 수 있었음("Champagne"·"샴페인"으로는 2PM·동방신기·에픽하이의 수록곡이 안 나왔음). iTunes 노래
+# 검색은 수록곡까지 제목으로 찾아 주고 한국어 검색어도 영어 제목 곡과 맞춰 줌("샴페인" → 2PM
+# "Champagne") — 그래서 iTunes로 (가수, 앨범, 몇 번째 곡)을 알아내고, 유튜브 뮤직에서 그 앨범을 찾아
+# 한국어 제목·가수·커버·듣기 주소를 붙임. 같은 제목 곡이 아주 많아서(Champagne 199곡) 앞쪽 몇 곡만:
+# 제목이 검색어와 같은(또는 검색어가 "제목 가수"인) 곡 → 한국 장르(K-Pop 등) 곡 → iTunes 순서.
+# 유튜브에서 앨범을 못 찾은 곡은 뺌(듣기·한국어 이름이 없어서). 같은 곡(가수·제목)은 한 번만.
+TRACK_POOL = 50
+TRACK_CANDIDATES = 8
+TRACK_WORKERS = 4
+_KOREAN_GENRE = re.compile(r"k-?pop|korean", re.IGNORECASE)
+# 노래방 음원 묶음은 빼고 — "나랑 아니면"을 찾으면 금영노래방 반주가 걸렸음.
+_KARAOKE = re.compile(r"노래방|karaoke", re.IGNORECASE)
+
+
+def _matches_title(query: str, song: str, itunes_title: str) -> bool:
+    """찾은 곡이 정말 그 제목인지 — iTunes는 가수 이름("CHAMPAGNE"이라는 래퍼)이나 비슷한 낱말로도
+    곡을 줘서 엉뚱한 곡이 섞였음. 유튜브 곡 제목에 검색어가 들어 있거나("샴페인 Champagne"), iTunes
+    제목이 검색어와 같으면 그 제목."""
+    key = _squash(query)
+    return bool(key) and (key in _squash(song) or _squash(itunes_title) == key)
+
+
+def _track_candidates(query: str, songs: list) -> list:
+    key = _squash(query)
+
+    def rank(pair):
+        i, s = pair
+        title = _squash(s["trackName"])
+        same_title = bool(title) and (title == key or key.startswith(title) or key.endswith(title))
+        korean = bool(_KOREAN_GENRE.search(s.get("primaryGenreName") or ""))
+        return (not same_title, not korean, i)
+
+    usable = [s for s in songs if s.get("trackName") and s.get("artistName") and s.get("collectionName")]
+    seen, picked = set(), []
+    for _, s in sorted(enumerate(usable), key=rank):
+        k = (_squash(s["artistName"]), _squash(s["trackName"]))
+        if k in seen:
+            continue
+        seen.add(k)
+        picked.append(s)
+        if len(picked) >= TRACK_CANDIDATES:
+            break
+    return picked
+
+
+def _resolve_track(query: str, song: dict) -> Optional[dict]:
+    """iTunes 곡 하나 → 유튜브 뮤직 앨범의 그 곡(노래 줄). 앨범을 못 찾거나 곡을 못 짚거나, 찾고 보니
+    검색한 제목이 아니면 None."""
+    album = _ITUNES_KIND.sub("", song["collectionName"])
+    hit = _yt_album(song["artistName"], album)
+    if not hit or not hit.get("browseId"):
+        return None
+    try:
+        data = _album(hit["browseId"]) or {}
+    except Exception:
+        return None
+    tracks = data.get("tracks") or []
+    key = _squash(song["trackName"])
+    index = next((i for i, t in enumerate(tracks, 1) if key and _squash(t.get("title")) == key), None)
+    # 제목이 번역돼 다르면("Grumbling" ↔ "넋두리") iTunes의 몇 번째 곡으로 — 디스크가 하나일 때만.
+    number = song.get("trackNumber")
+    if index is None and (song.get("discCount") or 1) == 1 and isinstance(number, int) and 1 <= number <= len(tracks):
+        index = number
+    if index is None:
+        return None
+    item = _to_item(hit)
+    title = tracks[index - 1].get("title") or song["trackName"]
+    if _KARAOKE.search(item["creator"] or "") or not _matches_title(query, title, song["trackName"]):
+        return None
+    return {
+        "album": item["album"],
+        "song": title,
+        "creator": item["creator"] or song["artistName"],
+        "kind": "노래",
+        "year": item["year"] or (song.get("releaseDate") or "")[:4],
+        "cover": item["cover"],
+        "listen": listen_url(data.get("audioPlaylistId"), index),
+        "album_id": hit["browseId"],
+    }
+
+
+def search_title_songs(query: str) -> List[dict]:
+    """노래 제목으로 그 제목의 곡들(여러 가수) — iTunes가 막히거나(분당 한도 포함) 실패하면 빈 목록
+    (프론트는 다른 검색 결과로 보여 줌)."""
+    if not _itunes_allowed():
+        return []
+    try:
+        songs = _itunes_songs(query)
+    except Exception:
+        return []
+    candidates = _track_candidates(query, songs)
+    if not candidates:
+        return []
+    with ThreadPoolExecutor(max_workers=TRACK_WORKERS) as pool:
+        found = list(pool.map(lambda c: _resolve_track(query, c), candidates))
+    out, seen = [], set()
+    for item in found:
+        if not item:
+            continue
+        k = (_squash(item["creator"]), _squash(item["song"]))
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(item)
+    return out

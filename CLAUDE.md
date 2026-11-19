@@ -270,6 +270,13 @@ tests/test_api.py
   `YTMUSIC_AUTH_FILE`(선택)에 버리는 구글 계정의 ytmusicapi 브라우저 인증 JSON 경로를 주면
   로그인 검색을 먼저 해 보고, 실패하면(쿠키 만료·계정 차단) 비로그인으로 돌아감 — 본 계정은
   절대 쓰지 말 것. ytmusicapi는 요청에 timeout을 안 줘서 `_TimeoutSession`으로 5초를 붙임.
+- 음악 제목 검색(2026-11-19): `GET /api/search/music?q=&by=track`은 앨범 안 수록곡을 **노래 제목으로**
+  찾음(`music_search.search_title_songs`) — iTunes 노래 검색(50곡) → 제목이 같은 곡·한국 장르 먼저 8곡 →
+  그 앨범을 유튜브 뮤직에서 찾아(`_yt_album`) 곡 제목·표지·듣기 주소(앨범 재생목록 + 몇 번째 곡)를 붙임.
+  iTunes는 한글 검색어도 영어 제목 곡과 맞춰 줌("샴페인" → 2PM "Champagne"). 유튜브 곡 제목에 검색어가
+  없거나 iTunes 제목이 검색어와 다르면(가수 이름만 겹친 곡) 빼고, 노래방 음원도 뺌. iTunes 한도
+  (`_itunes_allowed`, 서버 전체 분당 18번)를 넘거나 iTunes가 실패하면 빈 목록(503 아님 — 프론트가 다른
+  검색 결과로 보여 줌).
 - 책 검색: `KAKAO_REST_KEY`(비밀, 선택) 환경 변수로 `GET /api/search/book?q=&by=title|author`가
   (`by=author`면 카카오 `target=person` — 작가 칸에서 이름으로만 찾을 때) 카카오
   책 검색을 대신 불러 `[{title, full_title, creator, publisher, year, cover}]`로 다듬어

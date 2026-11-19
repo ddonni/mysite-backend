@@ -71,13 +71,14 @@ def search_book(
 def search_music(
     request: Request,
     q: str = Query(..., min_length=1, max_length=100),
-    by: Literal["title", "artist", "songs"] = "title",
+    by: Literal["title", "artist", "songs", "track"] = "title",
 ):
     """"새 기록" 창 음악 탭의 앨범 검색 — 유튜브 뮤직(비공식 ytmusicapi)에서
     앨범(가끔 노래)을 찾아 가수·커버를 채울 수 있게 돌려줌(music_search.py
     위쪽 설명). by=artist(가수 칸)면 그 가수의 앨범·싱글 목록(일반 검색은 앨범
     3개뿐이라), by=songs("여러 개 추가"의 검색해서 고르기)면 그 가수의 노래 목록
-    (수록곡을 모은 것, song에 노래 제목). 유튜브가 응답 형식을 바꾸거나 막으면 503 — 프론트는 이때 직접
+    (수록곡을 모은 것, song에 노래 제목), by=track이면 그 제목의 노래들(여러 가수 — iTunes로 찾아
+    유튜브 뮤직 앨범의 곡으로, music_search.search_title_songs). 유튜브가 응답 형식을 바꾸거나 막으면 503 — 프론트는 이때 직접
     입력만 하게 됨."""
     check_rate_limit(request, _music_searches, MUSIC_SEARCH_LIMIT, MUSIC_SEARCH_WINDOW, TOO_MANY)
     try:
@@ -86,6 +87,8 @@ def search_music(
             return _music_cache.get_or_set((q, by), lambda: music_search.search_artist(q))
         if by == "songs":
             return _music_cache.get_or_set((q, by), lambda: music_search.search_artist_songs(q))
+        if by == "track":
+            return _music_cache.get_or_set((q, by), lambda: music_search.search_title_songs(q))
         return _music_cache.get_or_set((q, by), lambda: music_search.search_music(q))
     except music_search.SearchUnavailable:
         raise HTTPException(status_code=503, detail="music search unavailable")

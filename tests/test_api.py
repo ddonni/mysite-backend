@@ -1129,6 +1129,7 @@ def no_itunes(monkeypatch):
     나가지 않게 — 기본은 "노래 못 찾음". 노래 찾기를 보는 테스트는 _itunes를 다시 바꿈."""
     from app import music_search
     monkeypatch.setattr("app.music_search._itunes", lambda q: [])
+    monkeypatch.setattr("app.music_search._itunes_songs", lambda q: [])
     music_search._itunes_calls.clear()
 
 
@@ -1919,3 +1920,68 @@ def test_in_progress_saved_except_music(room):
     # 다 봤으면 끔
     done = client.put(f"{url}/{book['id']}", json=make_record(in_progress=False), headers=auth(room)).json()
     assert done["in_progress"] is False
+
+
+# --- music search: 노래 제목으로 수록곡 찾기(by=track) ---
+
+def _itunes_track(title, artist, album, number=1, genre="K-Pop"):
+    return {"trackName": title, "artistName": artist, "collectionName": album, "trackNumber": number,
+            "discCount": 1, "primaryGenreName": genre, "releaseDate": "2021-06-28T12:00:00Z"}
+
+
+def _yt_albums(monkeypatch, answers, tracklists):
+    """유튜브 검색("가수 앨범" → 앨범 결과)과 앨범 수록곡을 가짜로."""
+    calls = _ytm_by_query(monkeypatch, answers)
+
+    def fake_album(browse_id):
+        if browse_id not in tracklists:
+            raise Exception("album failed")
+        return {"tracks": [{"title": t} for t in tracklists[browse_id]], "audioPlaylistId": f"OLAK_{browse_id}"}
+    monkeypatch.setattr("app.music_search._album", fake_album)
+    return calls
+
+
+def test_music_search_track_finds_album_tracks_by_title_with_korean_names(monkeypatch):
+    # "샴페인" → iTunes가 영어 제목 곡(2PM "Champagne", 4번째 곡)을 줌 → 유튜브 앨범의 한국어 제목·듣기 주소
+    monkeypatch.setattr("app.music_search._itunes_songs", lambda q: [
+        _itunes_track("Champagne", "2PM", "MUST", number=4),
+        _itunes_track("Sorry, I'm Busy (feat. CHAMPAGNE)", "INFINITE H", "Fly Again", number=2),  # 제목이 아님
+    ])
+    _yt_albums(monkeypatch, {
+        "2PM MUST": [{"resultType": "album", "title": "MUST", "browseId": "M1", "year": "2021",
+                      "artists": [{"name": "2PM"}], "thumbnails": [{"url": "https://yt3.googleusercontent.com/m"}]}],
+        "INFINITE H Fly Again": [{"resultType": "album", "title": "Fly Again", "browseId": "F1",
+                                  "artists": [{"name": "인피니트H"}], "thumbnails": []}],
+    }, {"M1": ["해야 해", "Make it", "우리집", "샴페인 Champagne"], "F1": ["Intro", "바빠서 Sorry"]})
+    resp = client.get("/api/search/music", params={"q": "샴페인", "by": "track"})
+    assert resp.status_code == 200
+    assert resp.json() == [{
+        "album": "MUST", "song": "샴페인 Champagne", "creator": "2PM", "kind": "노래", "year": "2021",
+        "cover": "https://yt3.googleusercontent.com/m",
+        "listen": "https://www.youtube.com/playlist?list=OLAK_M1&index=4", "album_id": "M1",
+    }]
+
+
+def test_music_search_track_matches_by_title_first_and_skips_karaoke_and_unknown_albums(monkeypatch):
+    monkeypatch.setattr("app.music_search._itunes_songs", lambda q: [
+        _itunes_track("넋두리", "Kim Hyun Shik", "김현식 5", number=3, genre="Pop"),
+        _itunes_track("넋두리", "KY Karaoke", "노래방 모음", number=1),
+        _itunes_track("넋두리", "Nobody", "없는 앨범"),
+    ])
+    _yt_albums(monkeypatch, {
+        "Kim Hyun Shik 김현식 5": [{"resultType": "album", "title": "김현식 5", "browseId": "K5",
+                                    "artists": [{"name": "김현식"}], "thumbnails": []}],
+        "KY Karaoke 노래방 모음": [{"resultType": "album", "title": "노래방 모음", "browseId": "KY",
+                                    "artists": [{"name": "금영노래방"}], "thumbnails": []}],
+    }, {"K5": ["골목길", "비처럼 음악처럼", "넋두리"], "KY": ["넋두리"]})
+    body = client.get("/api/search/music", params={"q": "넋두리", "by": "track"}).json()
+    assert [(s["song"], s["creator"]) for s in body] == [("넋두리", "김현식")]
+
+
+def test_music_search_track_is_empty_when_itunes_fails(monkeypatch, ytm):
+    def boom(q):
+        raise Exception("itunes down")
+    monkeypatch.setattr("app.music_search._itunes_songs", boom)
+    resp = client.get("/api/search/music", params={"q": "샴페인", "by": "track"})
+    assert resp.status_code == 200
+    assert resp.json() == []
