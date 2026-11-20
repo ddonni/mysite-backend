@@ -350,10 +350,12 @@ def list_records(
     cat: Optional[str] = None,
     room: models.Room = Depends(get_room),
     actor: Optional[models.Room] = Depends(social_routes.optional_actor),
+    x_room_token: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """코드만 있으면 누구나. X-Actor-* 헤더(보는 사람의 방)를 주면 카드마다 내가 공감했는지도."""
-    records = crud.list_records(db, room.id, cat)
+    """코드만 있으면 누구나. X-Actor-* 헤더(보는 사람의 방)를 주면 카드마다 내가 공감했는지도.
+    옷·일기는 X-Room-Token이 이 방 것일 때(방 주인)만 들어감 — 토큰이 틀려도 403이 아니라 그냥 뺌."""
+    records = crud.list_records(db, room.id, cat, include_private=_token_matches(x_room_token, room.token))
     social_routes.attach_record_likes(db, records, actor)
     return records
 
@@ -397,6 +399,8 @@ def feature_record(record_id: int, body: schemas.RecordFeatureIn, room: models.R
         record = crud.set_featured(db, room.id, record_id, body.featured)
     except crud.FeaturedLimitError:
         raise HTTPException(status_code=400, detail="featured_limit")
+    except crud.NotFeaturableError:
+        raise HTTPException(status_code=400, detail="not_featurable")
     if record is None:
         raise HTTPException(status_code=404, detail="record not found")
     return record

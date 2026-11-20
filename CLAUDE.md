@@ -66,6 +66,14 @@
   카테고리마다 받는 요소·장르는 `schemas.DETAIL_ASPECTS`·`DETAIL_GENRES`(프론트
   `js/library/modal/detailFields.js`와 같아야 함). 별점은 0.5~5의 0.5 단위, 장르 최대 5개, 음악·빈 값은
   null. `records.in_progress`(보는 중·읽는 중) — 음악이면 늘 false.
+- **옷·일기**(2026-11-20, `schemas.PRIVATE_CATS`): `cat`이 `clothes`·`diary`인 기록은 **방 주인만 봄** —
+  `GET .../records`는 `X-Room-Token`이 맞을 때만 넣고(틀려도 403이 아니라 그냥 뺌), 둘러보기 수·최근 활동·인생작
+  (`list_public_rooms`), 자동 완성(`cat`이 작품 넷만), 카드 공감(404)에서도 빠짐. 인생작은 400 `"not_featurable"`.
+  옷: 이름(`title`)·사진(`photo_url`) 필수, 브랜드는 `creator`, 나머지는 `records.attrs` JSON(마이그레이션 `c5e7a9b1d3f6`이 `attrs`·`photos` 두 칸을 더함, `schemas.ClothesAttrs` —
+  구매일·종류·색·계절 여러 개·핏·톤·태그·소재·사이즈, 정해진 값은 프론트 `js/library/modal/clothesFields.js`와 같아야
+  함). 일기: 본문(`memo`, 최대 1만 자) 필수, 제목은 빈 문자열도 됨, `date`를 고를 수 있음(다른 카테고리는 무시 —
+  늘 오늘), 사진 여러 장은 `records.photos` JSON(순서대로 최대 20장, http(s) 주소만 — 서버가 `photo_url`을 늘 첫 장으로
+  맞춤, `photos` 없이 `photo_url`만 보내면 한 장짜리 목록). 둘 다 별점·보는 중·세부 기록·유튜브 링크는 버림. 코디·OOTD는 나중에(사용자 결정).
 - `Page`/`Record`는 둘 다 `room_id`를 가지며, `Page`의
   `(room_id, page_number)`가 유니크 — 방마다 자기만의 1..count
   페이지 번호 체계를 가짐(예전엔 `page_number` 전역 유니크였음).

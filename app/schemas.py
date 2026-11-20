@@ -278,6 +278,79 @@ class RecordDetails(BaseModel):
         return v
 
 
+# 카테고리 — 작품 넷 + 옷·일기(2026-11-20). 옷·일기는 **방 주인만** 봄(GET 목록은 토큰이 맞을 때만
+# 넣고, 둘러보기 수·인생작·자동 완성·공감에서도 빠짐 — crud.list_records, list_public_rooms).
+WORK_CATS = ("book", "anime", "movie", "music")
+PRIVATE_CATS = ("clothes", "diary")
+CATS = WORK_CATS + PRIVATE_CATS
+
+# 옷 칸에서 고르는 값 — 프론트 js/library/modal/clothesFields.js와 같아야 함. 나중에 코디·OOTD에서
+# 묶어 쓰기 좋게 정해진 값만 받음(태그·소재·사이즈는 자유롭게).
+CLOTHES_KINDS = ("상의", "하의", "아우터", "원피스", "신발", "가방", "모자", "액세서리")
+CLOTHES_COLORS = (
+    "블랙", "화이트", "그레이", "베이지", "브라운", "네이비", "블루", "스카이블루",
+    "그린", "카키", "레드", "핑크", "퍼플", "옐로", "오렌지", "멀티",
+)
+CLOTHES_SEASONS = ("봄", "여름", "가을", "겨울")
+CLOTHES_FITS = ("슬림", "레귤러", "세미오버", "오버")
+CLOTHES_TONES = ("웜톤", "쿨톤", "뉴트럴")
+CLOTHES_TAGS_MAX = 10
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _valid_date(v: Optional[str]) -> Optional[str]:
+    """빈 값은 None, 아니면 실제로 있는 날짜의 YYYY-MM-DD만."""
+    v = (v or "").strip()
+    if not v:
+        return None
+    if not _DATE.match(v):
+        raise ValueError("date must be YYYY-MM-DD")
+    datetime.strptime(v, "%Y-%m-%d")  # 2월 30일 같은 날짜는 ValueError
+    return v
+
+
+class ClothesAttrs(BaseModel):
+    """옷 하나의 추가 칸(전부 선택). 계절은 여러 개(같은 값은 한 번, 봄→겨울 순으로),
+    태그는 앞뒤 공백을 잘라 15자까지 최대 10개."""
+
+    purchased: Optional[str] = None
+    kind: Optional[Literal[CLOTHES_KINDS]] = None
+    color: Optional[Literal[CLOTHES_COLORS]] = None
+    seasons: List[Literal[CLOTHES_SEASONS]] = []
+    fit: Optional[Literal[CLOTHES_FITS]] = None
+    tone: Optional[Literal[CLOTHES_TONES]] = None
+    tags: List[Annotated[str, StringConstraints(strip_whitespace=True, max_length=15)]] = []
+    material: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=30)]] = None
+    size: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=10)]] = None
+
+    @field_validator("purchased")
+    @classmethod
+    def _purchased(cls, v: Optional[str]) -> Optional[str]:
+        return _valid_date(v)
+
+    @field_validator("seasons")
+    @classmethod
+    def _seasons(cls, v: list) -> list:
+        return [s for s in CLOTHES_SEASONS if s in v]
+
+    @field_validator("tags")
+    @classmethod
+    def _tags(cls, v: list) -> list:
+        tags = list(dict.fromkeys(t for t in v if t))
+        if len(tags) > CLOTHES_TAGS_MAX:
+            raise ValueError(f"at most {CLOTHES_TAGS_MAX} tags")
+        return tags
+
+    @field_validator("material", "size")
+    @classmethod
+    def _blank_is_none(cls, v: Optional[str]) -> Optional[str]:
+        return v or None
+
+
+DIARY_MAX = 10000
+DIARY_PHOTOS_MAX = 20  # 프론트 js/diary/photos.js의 PHOTOS_MAX와 같아야 함
+
+
 class RecordIn(BaseModel):
     """One 'watched/read it' log entry. photo_url comes from POST
     /api/uploads — the client uploads the photo first, then sends the
@@ -285,7 +358,7 @@ class RecordIn(BaseModel):
     URL picked from GET /api/search/book (stored as-is, shown through
     GET /api/cover)."""
 
-    cat: Literal["book", "anime", "movie", "music"]
+    cat: Literal[CATS]
     title: str
     creator: Optional[str] = None
     rating: float = 0
@@ -295,6 +368,55 @@ class RecordIn(BaseModel):
     details: Optional[RecordDetails] = None
     # 보는 중·읽는 중 — 음악엔 없어서 음악이면 늘 False로 저장.
     in_progress: bool = False
+    # 옷의 추가 칸(옷이 아니면 버림).
+    attrs: Optional[ClothesAttrs] = None
+    # 일기의 날짜(YYYY-MM-DD) — 어제 일을 오늘 쓰는 일이 많아서 일기만 고를 수 있음. 안 주면(또는 다른
+    # 카테고리면) 저장할 때 오늘(새 기록) / 그대로(수정).
+    date: Optional[str] = None
+    # 일기의 사진들(2026-11-20, 여러 장 — POST .../uploads가 돌려준 주소들, 보여 줄 순서대로). 첫 장이 카드
+    # 표지라 photo_url은 늘 photos[0]으로 맞춤. 일기가 아니면 버림.
+    photos: Optional[List[str]] = None
+
+    @model_validator(mode="after")
+    def _private_categories(self) -> "RecordIn":
+        """옷: 이름(title)·사진이 꼭 있어야 함. 일기: 본문(memo)이 꼭 있어야 하고 제목은 비워도 됨.
+        둘 다 별점·보는 중·세부 기록·유튜브 링크가 없음. 요청에만 적용 — RecordOut(응답)은 이 클래스를
+        물려받지만 date가 저장된 날짜라서 여기서 지우면 안 됨."""
+        if type(self) is not RecordIn:
+            return self
+        if self.cat != "clothes":
+            self.attrs = None
+        elif self.attrs is None:
+            self.attrs = ClothesAttrs()
+        self.date = _valid_date(self.date) if self.cat == "diary" else None
+        if self.cat == "diary":
+            # 예전처럼 photo_url 하나만 보내도 한 장짜리 목록으로. 같은 주소는 한 번만.
+            photos = self.photos if self.photos is not None else ([self.photo_url] if self.photo_url else [])
+            photos = list(dict.fromkeys(p.strip() for p in photos if p and p.strip()))
+            if len(photos) > DIARY_PHOTOS_MAX:
+                raise ValueError(f"at most {DIARY_PHOTOS_MAX} photos")
+            if any(len(p) > 500 or not p.startswith(("https://", "http://")) for p in photos):
+                raise ValueError("photos must be uploaded photo URLs")
+            self.photos = photos
+            self.photo_url = photos[0] if photos else None
+        else:
+            self.photos = None
+        if self.cat not in PRIVATE_CATS:
+            return self
+        self.title = self.title.strip()
+        self.rating = 0
+        self.in_progress = False
+        self.details = None
+        self.listen_url = None
+        if self.cat == "clothes" and (not self.title or not self.photo_url):
+            raise ValueError("clothes need a name and a photo")
+        if self.cat == "diary":
+            self.memo = (self.memo or "").strip()
+            if not self.memo:
+                raise ValueError("diary needs some text")
+            if len(self.memo) > DIARY_MAX:
+                raise ValueError(f"diary is at most {DIARY_MAX} characters")
+        return self
 
     @model_validator(mode="after")
     def _details_for_category(self) -> "RecordIn":
@@ -328,6 +450,8 @@ class RecordIn(BaseModel):
 
 
 class RecordOut(RecordIn):
+    """응답은 저장된 값 그대로 — 위 검사(옷은 사진 필수 등)를 다시 하지 않음."""
+
     id: int
     date: str
     featured: bool = False

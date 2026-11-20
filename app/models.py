@@ -49,7 +49,9 @@ class Room(Base):
 
 
 class Record(Base):
-    """One 'watched/read it' log entry (book, anime, movie, or music).
+    """One 'watched/read it' log entry (book, anime, movie, or music) — or, since
+    2026-11-20, a piece of clothing or a diary entry (schemas.PRIVATE_CATS: only the
+    room owner ever sees those).
 
     photo_url points at an object in S3 — the browser uploads the photo
     directly through the API, which forwards it to S3 and stores only the
@@ -88,6 +90,12 @@ class Record(Base):
     # 순서. NULL이면 직접 놓지 않은 것 — 프론트가 별점으로 자동 배치함(js/tier/board.js의 tierFromRating).
     tier = Column(String, nullable=True)
     tier_pos = Column(Integer, nullable=True)
+    # 옷의 추가 칸(2026-11-20) — {"purchased": "2026-03-01", "kind": "상의", "color": "네이비", "seasons": ["봄"],
+    # "fit": ..., "tone": ..., "tags": [...], "material": ..., "size": ...}(schemas.ClothesAttrs). 옷 이름은 title,
+    # 브랜드는 creator를 그대로 씀. 옷이 아니면 NULL.
+    attrs = Column(JSON, nullable=True)
+    # 일기의 사진 주소들(2026-11-20, 순서대로 최대 20장) — 첫 장은 photo_url에도 들어감(카드 표지). 일기가 아니면 NULL.
+    photos = Column(JSON, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     room = relationship("Room", back_populates="records")

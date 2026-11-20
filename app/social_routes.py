@@ -175,7 +175,8 @@ def attach_record_likes(db: Session, records: List[models.Record], actor: Option
 
 def _record(db: Session, room: models.Room, record_id: int) -> models.Record:
     record = db.query(models.Record).filter(models.Record.id == record_id, models.Record.room_id == room.id).first()
-    if record is None:
+    # 옷·일기는 남에게 안 보이는 기록 — 있는지조차 알려 주지 않게 없는 것과 똑같이.
+    if record is None or record.cat in schemas.PRIVATE_CATS:
         raise HTTPException(status_code=404, detail="record not found")
     return record
 

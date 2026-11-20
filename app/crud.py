@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import models
+from . import models, schemas
 
 # Room codes are short and typed by hand (shared with a friend to visit
 # their room), so the alphabet drops characters that are easy to
@@ -93,6 +93,8 @@ def list_public_rooms(db: Session, sort: str = "recent") -> List[dict]:
         )
         .join(models.Record, models.Record.room_id == models.Room.id)
         .filter(models.Room.is_public.is_(True))
+        # 옷·일기는 주인만 보는 기록이라 수·최근 활동에서도 뺌(일기만 쓴 방이 목록에 뜨지 않게).
+        .filter(models.Record.cat.in_(schemas.WORK_CATS))
         .group_by(models.Room.id, models.Record.cat)
         .all()
     )
@@ -300,8 +302,11 @@ def delete_page(db: Session, room_id: int, page_number: int) -> Tuple[bool, Opti
     return True, None
 
 
-def list_records(db: Session, room_id: int, cat: Optional[str] = None) -> list:
+def list_records(db: Session, room_id: int, cat: Optional[str] = None, include_private: bool = False) -> list:
+    """include_private: 옷·일기(schemas.PRIVATE_CATS)도 넣을지 — 방 주인이 물을 때만 True."""
     q = db.query(models.Record).filter(models.Record.room_id == room_id)
+    if not include_private:
+        q = q.filter(models.Record.cat.in_(schemas.WORK_CATS))
     if cat is not None:
         q = q.filter(models.Record.cat == cat)
     return q.order_by(models.Record.date.desc(), models.Record.id.desc()).all()
@@ -319,7 +324,10 @@ def today_kst() -> str:
 
 
 def create_record(db: Session, room_id: int, data: dict) -> models.Record:
-    record = models.Record(**data, room_id=room_id, date=today_kst())
+    # 날짜는 오늘 — 일기만 고른 날짜(schemas.RecordIn.date)를 씀.
+    data = dict(data)
+    date = data.pop("date", None) or today_kst()
+    record = models.Record(**data, room_id=room_id, date=date)
     db.add(record)
     db.commit()
     db.refresh(record)
@@ -341,6 +349,10 @@ def update_record(db: Session, room_id: int, record_id: int, data: dict) -> Opti
     record = _get_record(db, room_id, record_id)
     if record is None:
         return None
+    data = dict(data)
+    date = data.pop("date", None)  # 일기에서 날짜를 바꿨을 때만 — 그 밖엔 처음 날짜 그대로
+    if date:
+        record.date = date
     for key, value in data.items():
         setattr(record, key, value)
     # 음악이 아닌 카테고리로 고쳐졌으면 턴테이블에서도 내림.
@@ -360,6 +372,10 @@ class FeaturedLimitError(Exception):
     """이 카테고리의 인생작이 이미 FEATURED_PER_CAT개 켜져 있음."""
 
 
+class NotFeaturableError(Exception):
+    """옷·일기는 인생작이 없음(남에게 안 보이는 기록이라)."""
+
+
 def set_featured(db: Session, room_id: int, record_id: int, featured: bool) -> Optional[models.Record]:
     """인생작은 방 안에서 카테고리마다 최대 FEATURED_PER_CAT개. 이미 꽉 찬
     카테고리에 하나 더 켜려고 하면, 다른 걸 몰래 끄는 대신
@@ -367,6 +383,8 @@ def set_featured(db: Session, room_id: int, record_id: int, featured: bool) -> O
     record = _get_record(db, room_id, record_id)
     if record is None:
         return None
+    if featured and record.cat in schemas.PRIVATE_CATS:
+        raise NotFeaturableError()
     if featured and not record.featured:
         count = (
             db.query(func.count(models.Record.id))

@@ -1985,3 +1985,123 @@ def test_music_search_track_is_empty_when_itunes_fails(monkeypatch, ytm):
     resp = client.get("/api/search/music", params={"q": "샴페인", "by": "track"})
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+# --- 옷·일기(주인만 보는 카테고리, 2026-11-20) ---
+
+PHOTO = "https://example.com/shirt.jpg"
+
+
+def make_clothes(**overrides):
+    body = {"cat": "clothes", "title": "옥스퍼드 셔츠", "creator": "유니클로", "photo_url": PHOTO,
+            "attrs": {"purchased": "2026-03-02", "kind": "상의", "color": "스카이블루", "seasons": ["가을", "봄", "봄"],
+                      "fit": "레귤러", "tone": "쿨톤", "tags": [" 스트라이프 ", "", "스트라이프", "기본"],
+                      "material": "면", "size": "M"}}
+    body.update(overrides)
+    return body
+
+
+def make_diary(**overrides):
+    body = {"cat": "diary", "title": "", "memo": "  오늘은 눈이 왔다.  ", "date": "2026-11-19", "photo_url": PHOTO}
+    body.update(overrides)
+    return body
+
+
+def test_clothes_keep_their_attrs(room):
+    resp = client.post(f"/api/rooms/{room['code']}/records", json=make_clothes(rating=4, in_progress=True), headers=auth(room))
+    assert resp.status_code == 200
+    rec = resp.json()
+    assert rec["attrs"]["seasons"] == ["봄", "가을"]
+    assert rec["attrs"]["tags"] == ["스트라이프", "기본"]
+    assert rec["attrs"]["purchased"] == "2026-03-02"
+    assert rec["creator"] == "유니클로"
+    assert rec["rating"] == 0 and rec["in_progress"] is False
+    # 날짜는 구매일이 아니라 기록한 날(다른 기록과 같은 순서로 섞이게).
+    assert rec["date"] != "2026-03-02"
+
+
+def test_clothes_need_name_and_photo_and_known_values(room):
+    url = f"/api/rooms/{room['code']}/records"
+    assert client.post(url, json=make_clothes(photo_url=None), headers=auth(room)).status_code == 422
+    assert client.post(url, json=make_clothes(title="  "), headers=auth(room)).status_code == 422
+    assert client.post(url, json=make_clothes(attrs={"kind": "잠옷"}), headers=auth(room)).status_code == 422
+    assert client.post(url, json=make_clothes(attrs={"purchased": "2026-02-30"}), headers=auth(room)).status_code == 422
+    assert client.post(url, json=make_clothes(attrs={"tags": [f"t{i}" for i in range(11)]}), headers=auth(room)).status_code == 422
+    # 이름·사진만 있으면 됨.
+    resp = client.post(url, json={"cat": "clothes", "title": "니트", "photo_url": PHOTO}, headers=auth(room))
+    assert resp.status_code == 200 and resp.json()["attrs"]["seasons"] == []
+
+
+def test_attrs_are_dropped_for_other_categories(room):
+    rec = client.post(f"/api/rooms/{room['code']}/records", json=make_record(attrs={"kind": "상의"}, date="2020-01-01"),
+                      headers=auth(room)).json()
+    assert rec["attrs"] is None
+    assert rec["date"] != "2020-01-01"
+
+
+def test_diary_uses_chosen_date_and_needs_text(room):
+    url = f"/api/rooms/{room['code']}/records"
+    rec = client.post(url, json=make_diary(), headers=auth(room)).json()
+    assert rec["date"] == "2026-11-19"
+    assert rec["memo"] == "오늘은 눈이 왔다."
+    assert rec["photo_url"] == PHOTO
+    assert client.post(url, json=make_diary(memo="   "), headers=auth(room)).status_code == 422
+    assert client.post(url, json=make_diary(date="어제"), headers=auth(room)).status_code == 422
+    # 날짜를 안 주면 오늘, 수정할 때 안 주면 그대로.
+    today = client.post(url, json=make_diary(date=None), headers=auth(room)).json()
+    assert today["date"] != "2026-11-19"
+    edited = client.put(f"{url}/{rec['id']}", json=make_diary(date=None, memo="고침"), headers=auth(room)).json()
+    assert edited["date"] == "2026-11-19" and edited["memo"] == "고침"
+    moved = client.put(f"{url}/{rec['id']}", json=make_diary(date="2026-11-01"), headers=auth(room)).json()
+    assert moved["date"] == "2026-11-01"
+
+
+def test_clothes_and_diary_are_owner_only(room):
+    url = f"/api/rooms/{room['code']}/records"
+    client.post(url, json=make_record(), headers=auth(room))
+    client.post(url, json=make_clothes(), headers=auth(room))
+    client.post(url, json=make_diary(), headers=auth(room))
+    assert sorted(r["cat"] for r in client.get(url, headers=auth(room)).json()) == ["book", "clothes", "diary"]
+    assert [r["cat"] for r in client.get(url).json()] == ["book"]
+    assert [r["cat"] for r in client.get(url, headers={"X-Room-Token": "wrong"}).json()] == ["book"]
+    assert client.get(url, params={"cat": "diary"}).json() == []
+
+
+def test_private_records_stay_out_of_public_list_likes_and_featured(room, visitor):
+    url = f"/api/rooms/{room['code']}/records"
+    diary = client.post(url, json=make_diary(), headers=auth(room)).json()
+    make_public(room)
+    # 일기만 있는 방은 둘러보기에 안 뜸.
+    assert client.get("/api/rooms").json() == []
+    client.post(url, json=make_record(), headers=auth(room))
+    (listed,) = client.get("/api/rooms").json()
+    assert listed["total"] == 1 and "diary" not in listed["counts"]
+    resp = client.put(f"{url}/{diary['id']}/likes", headers=actor(visitor))
+    assert resp.status_code == 404
+    resp = _feature(room, diary["id"])
+    assert resp.status_code == 400 and resp.json()["detail"] == "not_featurable"
+
+
+def test_diary_keeps_many_photos_and_first_is_cover(room):
+    url = f"/api/rooms/{room['code']}/records"
+    photos = [f"https://example.com/{i}.jpg" for i in range(3)]
+    rec = client.post(url, json=make_diary(photo_url=None, photos=photos + [photos[0], " "]), headers=auth(room)).json()
+    assert rec["photos"] == photos
+    assert rec["photo_url"] == photos[0]
+    # 순서를 바꾸면 표지도 바뀜, 다 빼면 표지도 없음.
+    moved = client.put(f"{url}/{rec['id']}", json=make_diary(photos=photos[::-1]), headers=auth(room)).json()
+    assert moved["photo_url"] == photos[2]
+    empty = client.put(f"{url}/{rec['id']}", json=make_diary(photo_url=None, photos=[]), headers=auth(room)).json()
+    assert empty["photos"] == [] and empty["photo_url"] is None
+    # photo_url만 보내도(예전 방식) 한 장짜리 목록.
+    single = client.post(url, json=make_diary(), headers=auth(room)).json()
+    assert single["photos"] == [PHOTO]
+
+
+def test_diary_photos_are_limited_and_other_categories_drop_them(room):
+    url = f"/api/rooms/{room['code']}/records"
+    too_many = [f"https://example.com/{i}.jpg" for i in range(21)]
+    assert client.post(url, json=make_diary(photos=too_many), headers=auth(room)).status_code == 422
+    assert client.post(url, json=make_diary(photos=["javascript:alert(1)"]), headers=auth(room)).status_code == 422
+    book = client.post(url, json=make_record(photos=["https://example.com/a.jpg"]), headers=auth(room)).json()
+    assert book["photos"] is None
