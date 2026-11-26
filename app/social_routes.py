@@ -11,7 +11,6 @@
 - 지우기: 글쓴이 본인 또는 방 주인(구글 연결과 상관없이 토큰만 맞으면).
 - 자기 기록엔 좋아요를 못 누름(400 "own_room").
 """
-import secrets
 from datetime import timedelta
 from typing import Dict, List, Optional
 
@@ -44,7 +43,7 @@ def _actor(db: Session, code: Optional[str], token: Optional[str]) -> Optional[m
     if not code or not token:
         return None
     room = crud.get_room_by_code(db, code.upper())
-    if room is None or not secrets.compare_digest(token.encode(), room.token.encode()):
+    if room is None or not crud.token_matches(room, token):
         return None
     return room
 

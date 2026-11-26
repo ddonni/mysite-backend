@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
+os.environ["ROOM_TOKEN_SECRET"] = "test-secret"  # 구글 연결 방의 token을 계산하는 키(crud.linked_token)
 
 import pytest
 from fastapi.testclient import TestClient
@@ -709,34 +710,84 @@ def fake_google_claims(sub="google-user-1"):
     return {"sub": sub, "email": "test@example.com"}
 
 
+def link_google(r):
+    """r(방 dict)에 구글을 연결하고, 바뀐 token을 r에 다시 넣어 둠 — 연결하면
+    token이 서버가 계산하는 token으로 바뀌어서 옛 token은 더는 안 통함."""
+    resp = client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": r["code"], "current_token": r["token"],
+    })
+    r["token"] = resp.json()["token"]
+    return resp
+
+
 def test_google_auth_links_current_room_first_time(room, monkeypatch):
     monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    old_token = room["token"]
 
-    resp = client.post("/api/auth/google", json={
-        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
-    })
+    resp = link_google(room)
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"code": room["code"], "token": room["token"], "linked_new": True, "current_empty": None}
+    assert body["code"] == room["code"] and body["linked_new"] is True and body["current_empty"] is None
+    # 연결하면 token이 바뀜: 새 token은 통하고 옛 token은 안 통함
+    assert body["token"] != old_token
+    assert client.put(f"/api/rooms/{room['code']}/name", json={"name": "a"}, headers=auth(room)).status_code == 200
+    assert client.put(f"/api/rooms/{room['code']}/name", json={"name": "a"},
+                      headers={"X-Room-Token": old_token}).status_code == 403
 
 
 def test_google_auth_recovers_already_linked_room(room, monkeypatch):
     monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
-    client.post("/api/auth/google", json={
-        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
-    })
+    link_google(room)
 
     # 새 기기 시나리오: current_code/current_token 없이 구글 계정만으로 복구.
+    # 저장해 둔 token이 없어도 서버가 같은 token을 다시 계산해 줌 → 기기끼리 안 내쫓음.
     resp = client.post("/api/auth/google", json={"id_token": "fake"})
     assert resp.status_code == 200
     body = resp.json()
     assert body == {"code": room["code"], "token": room["token"], "linked_new": False, "current_empty": None}
+    assert client.post("/api/auth/google", json={"id_token": "fake"}).json()["token"] == room["token"]
 
 
-def link_google(r):
-    client.post("/api/auth/google", json={
-        "id_token": "fake", "current_code": r["code"], "current_token": r["token"],
+def test_google_auth_rotates_a_room_linked_before_hashing_once(room, monkeypatch):
+    # 해시 저장 전에 연결해 둔 방: google_sub는 있는데 token은 무작위 값.
+    # 첫 복구 때 계산한 token으로 한 번 바뀌고, 그 뒤로는 그대로.
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    db = SessionLocal()
+    try:
+        row = db.query(models.Room).filter(models.Room.code == room["code"]).one()
+        row.google_sub = "google-user-1"
+        db.commit()
+    finally:
+        db.close()
+
+    first = client.post("/api/auth/google", json={"id_token": "fake"}).json()["token"]
+    assert first != room["token"]
+    assert client.post("/api/auth/google", json={"id_token": "fake"}).json()["token"] == first
+    assert client.put(f"/api/rooms/{room['code']}/name", json={"name": "a"},
+                      headers={"X-Room-Token": first}).status_code == 200
+
+
+def test_google_auth_without_server_secret_is_503_and_changes_nothing(room, monkeypatch):
+    monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
+    monkeypatch.delenv("ROOM_TOKEN_SECRET")
+
+    resp = client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
     })
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "google link unavailable"
+    # 연결도 token도 그대로
+    assert client.get(f"/api/rooms/{room['code']}/google", headers=auth(room)).json()["linked"] is False
+
+
+def test_room_token_is_stored_only_as_a_hash(room):
+    db = SessionLocal()
+    try:
+        row = db.query(models.Room).filter(models.Room.code == room["code"]).one()
+        assert row.token_hash != room["token"]
+        assert room["token"] not in {str(v) for v in row.__dict__.values()}
+    finally:
+        db.close()
 
 
 def test_google_auth_recover_from_new_empty_room_says_current_empty(room, monkeypatch):
@@ -820,9 +871,7 @@ def test_google_status_unlinked_by_default(room):
 
 def test_google_status_shows_linked_email(room, monkeypatch):
     monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
-    client.post("/api/auth/google", json={
-        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
-    })
+    link_google(room)
 
     resp = client.get(f"/api/rooms/{room['code']}/google", headers=auth(room))
     assert resp.status_code == 200
@@ -838,9 +887,7 @@ def test_google_status_requires_owner_token(room):
 
 def test_google_unlink_clears_the_link_and_stops_recovery(room, monkeypatch):
     monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
-    client.post("/api/auth/google", json={
-        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
-    })
+    link_google(room)
 
     resp = client.delete(f"/api/rooms/{room['code']}/google", headers=auth(room))
     assert resp.status_code == 200
@@ -853,9 +900,7 @@ def test_google_unlink_clears_the_link_and_stops_recovery(room, monkeypatch):
 
 def test_google_unlink_requires_owner_token(room, monkeypatch):
     monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
-    client.post("/api/auth/google", json={
-        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
-    })
+    link_google(room)
 
     assert client.delete(f"/api/rooms/{room['code']}/google").status_code == 403
     assert client.get(f"/api/rooms/{room['code']}/google", headers=auth(room)).json()["linked"] is True
@@ -863,11 +908,12 @@ def test_google_unlink_requires_owner_token(room, monkeypatch):
 
 def test_google_relink_after_unlink_works(room, monkeypatch):
     monkeypatch.setattr("app.main.google_auth.verify_id_token", lambda t: fake_google_claims())
-    link = {"id_token": "fake", "current_code": room["code"], "current_token": room["token"]}
-    client.post("/api/auth/google", json=link)
+    link_google(room)
     client.delete(f"/api/rooms/{room['code']}/google", headers=auth(room))
 
-    resp = client.post("/api/auth/google", json=link)
+    resp = client.post("/api/auth/google", json={
+        "id_token": "fake", "current_code": room["code"], "current_token": room["token"],
+    })
     assert resp.status_code == 200
     assert resp.json()["linked_new"] is True
 

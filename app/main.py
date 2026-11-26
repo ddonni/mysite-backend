@@ -1,6 +1,5 @@
 import logging
 import os
-import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Literal, Optional, Tuple
@@ -111,13 +110,6 @@ FEEDBACK_LIMIT = 60
 FEEDBACK_WINDOW = timedelta(hours=1)
 
 
-def _token_matches(given: Optional[str], real: str) -> bool:
-    # 문자열을 ==로 비교하면 앞에서부터 틀린 글자를 만나는 순간 끝나서, 응답
-    # 시간 차이로 token을 한 글자씩 맞춰볼 여지가 생김 — 항상 같은 시간이
-    # 걸리는 비교를 씀.
-    return bool(given) and secrets.compare_digest(given.encode(), real.encode())
-
-
 def get_room(code: str, db: Session = Depends(get_db)) -> models.Room:
     room = crud.get_room_by_code(db, code)
     if room is None:
@@ -129,7 +121,7 @@ def require_owner(room: models.Room = Depends(get_room), x_room_token: Optional[
     """Visiting a room by its (shareable) code is always read-only.
     Mutating it additionally requires the room's (secret) token, which
     only the owner's browser holds — sent as the X-Room-Token header."""
-    if not _token_matches(x_room_token, room.token):
+    if not crud.token_matches(room, x_room_token):
         raise HTTPException(status_code=403, detail="not room owner")
     return room
 
@@ -165,8 +157,8 @@ def health_check_db(db: Session = Depends(get_db)):
 @app.post("/api/rooms", response_model=schemas.RoomOut)
 def create_room(request: Request, db: Session = Depends(get_db)):
     _check_room_rate_limit(request)
-    room = crud.create_room(db)
-    return {"code": room.code, "token": room.token}
+    room, token = crud.create_room(db)
+    return {"code": room.code, "token": token}
 
 
 @app.post("/api/feedback")
@@ -274,19 +266,32 @@ def google_auth_resolve(body: schemas.GoogleAuthIn, db: Session = Depends(get_db
     current = None
     if body.current_code and body.current_token:
         found = crud.get_room_by_code(db, body.current_code)
-        if found is not None and _token_matches(body.current_token, found.token):
+        if found is not None and crud.token_matches(found, body.current_token):
             current = found
 
-    linked = crud.get_room_by_google_sub(db, sub)
-    if linked is not None:
-        current_empty = None
-        if current is not None and current.id != linked.id:
-            current_empty = crud.is_room_empty(db, current.id)
-        return {"code": linked.code, "token": linked.token, "linked_new": False, "current_empty": current_empty}
+    # DB에는 token 해시만 있어서 원래 token을 돌려줄 수 없음 — 구글이 연결된 방의
+    # token은 서버 비밀 키로 계산해서 줌(crud.linked_token). 키가 없으면 이 기능만 503.
+    try:
+        linked = crud.get_room_by_google_sub(db, sub)
+        if linked is not None:
+            token = crud.linked_token(linked, sub)
+            # 이 방식 전에 연결해 둔 방은 무작위 token이라 여기서 한 번 계산한 token으로
+            # 바뀜(그 방의 다른 기기는 한 번 다시 구글 로그인). 그 뒤로는 그대로.
+            if not crud.token_matches(linked, token):
+                crud.set_token(db, linked, token)
+            current_empty = None
+            if current is not None and current.id != linked.id:
+                current_empty = crud.is_room_empty(db, current.id)
+            return {"code": linked.code, "token": token, "linked_new": False, "current_empty": current_empty}
 
-    if current is not None:
-        crud.set_google_sub(db, current, sub, claims.get("email"))
-        return {"code": current.code, "token": current.token, "linked_new": True}
+        if current is not None:
+            token = crud.linked_token(current, sub)
+            crud.set_google_sub(db, current, sub, claims.get("email"))
+            crud.set_token(db, current, token)
+            return {"code": current.code, "token": token, "linked_new": True}
+    except crud.TokenSecretMissing:
+        log.error("auth/google: ROOM_TOKEN_SECRET is not set")
+        raise HTTPException(status_code=503, detail="google link unavailable")
 
     raise HTTPException(status_code=404, detail="no room linked to this google account")
 

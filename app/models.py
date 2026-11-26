@@ -8,16 +8,17 @@ class Room(Base):
     """One person's space — a sketchbook plus a library, both scoped to
     this room's id. `code` is the short, shareable string that goes in
     URLs and that visitors type in to look a room up (read-only for them).
-    `token` is the long secret only the owner's browser holds (in
+    The room's token is the long secret only the owner's browser holds (in
     localStorage) and sends back on writes to prove it's really them —
-    see the require_owner dependency in main.py.
+    see the require_owner dependency in main.py. Only its SHA-256 hash
+    (`token_hash`) is stored here, never the token itself (crud.hash_token).
     """
 
     __tablename__ = "rooms"
 
     id = Column(Integer, primary_key=True, index=True)
     code = Column(String, unique=True, nullable=False, index=True)
-    token = Column(String, unique=True, nullable=False)
+    token_hash = Column(String, unique=True, nullable=False)
     # 로비 3D 씬의 색 팔레트 프리셋 이름(app.schemas.ROOM_THEMES) — 방
     # 주인이 고름, 코드만 있으면 누구나 GET으로 볼 수 있는 비밀 아닌
     # 값이라 owner_token 없이도 read_room에서 그대로 돌려줌.

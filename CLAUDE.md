@@ -26,6 +26,15 @@
   브라우저가 바뀌어도 token을 되찾을 수 있게" 하는 보조 기능임 —
   `rooms.google_sub`에 저장되고, code/token이 여전히 유일한 진짜
   인증 수단이라는 점은 안 바뀜.)
+- **token은 DB에 해시로만 저장**(2026-11-23, 리비전 `b9e1c3d5f7a2`): `rooms.token_hash` =
+  SHA-256(token)(`crud.hash_token`/`token_matches`). 원본은 주인 브라우저에만 있음. 해시라서 서버도
+  원래 token을 모르기 때문에, **구글이 연결된 방의 token은 서버 비밀 키로 계산**함 —
+  `crud.linked_token` = HMAC(`ROOM_TOKEN_SECRET`, `room:{id}:{google_sub}`). 처음 연결할 때 그
+  token으로 바뀌고(응답의 token을 프론트가 저장해야 함 — `js/shared/googleAuth.js`), 새 기기가 복구하면
+  같은 token을 다시 계산해 줌(기기끼리 안 내쫓음). 해시 전에 연결해 둔 방은 첫 복구 때 한 번 바뀜.
+  `ROOM_TOKEN_SECRET`(비밀, 서버 env)이 없으면 `POST /api/auth/google`만 503
+  `"google link unavailable"`. **이 키를 바꾸면 연결된 방이 모두 한 번 다시 구글 로그인해야 함.**
+  리비전은 되돌릴 수 없음(downgrade 없음 — 배포 전 백업으로 복원).
 - "방 둘러보기": `rooms.is_public`(기본 false)을 방 주인이
   `PUT /api/rooms/{code}/visibility` `{public: bool}`(토큰 필요)로 켜고 끔.
   `GET /api/rooms`(토큰 없이 누구나)는 공개로 켠 방 중 **기록이 하나라도

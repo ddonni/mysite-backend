@@ -1,3 +1,7 @@
+import base64
+import hashlib
+import hmac
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
@@ -18,9 +22,51 @@ def _generate_code() -> str:
     return "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
 
 
-def create_room(db: Session) -> models.Room:
+# --- 방 token: DB에는 해시만 ---
+# token 원본은 주인 브라우저(localStorage)에만 있고, DB에는 SHA-256 해시만
+# 둔다. DB나 백업이 새도 해시로는 token을 되돌릴 수 없어서 수정 요청을
+# 보낼 수 없다. 비밀번호와 달리 bcrypt 같은 느린 해시가 필요 없는 이유:
+# token은 사람이 정한 값이 아니라 무작위 값이라, 후보를 넣어 보며 맞히는
+# 공격이 애초에 안 된다.
+
+def hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def token_matches(room: models.Room, given: Optional[str]) -> bool:
+    # ==로 비교하면 앞에서부터 틀린 글자를 만나는 순간 끝나서, 응답 시간
+    # 차이로 한 글자씩 맞춰볼 여지가 생김 — 항상 같은 시간이 걸리는 비교를 씀.
+    return bool(given) and secrets.compare_digest(hash_token(given), room.token_hash)
+
+
+class TokenSecretMissing(Exception):
+    """ROOM_TOKEN_SECRET이 서버 환경 변수에 없음."""
+
+
+def linked_token(room: models.Room, google_sub: str) -> str:
+    """구글 계정이 연결된 방의 token. 저장하지 않고 서버 비밀 키로 **계산**한다
+    (HMAC) — DB에는 해시만 있어도, 새 기기가 구글로 복구할 때 같은 token을
+    다시 만들어 줄 수 있다. 그래서 폰과 PC가 같은 token을 쓰고 서로 내쫓지
+    않는다. 비밀 키는 DB가 아니라 서버 env에만 있어서, DB가 새도 계산할 수 없다.
+    대가: 키가 새면 연결된 방 token을 전부 계산할 수 있고, 키를 바꾸면 연결된
+    방이 모두 한 번씩 다시 구글 로그인해야 한다."""
+    secret = os.environ.get("ROOM_TOKEN_SECRET", "").strip()
+    if not secret:
+        raise TokenSecretMissing()
+    digest = hmac.new(secret.encode(), f"room:{room.id}:{google_sub}".encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+def set_token(db: Session, room: models.Room, token: str) -> None:
+    room.token_hash = hash_token(token)
+    db.commit()
+
+
+def create_room(db: Session) -> Tuple[models.Room, str]:
     """A room's code must be globally unique; collisions are astronomically
-    unlikely at this alphabet/length (32**6) but we retry just in case."""
+    unlikely at this alphabet/length (32**6) but we retry just in case.
+    Returns the room and its token — the only moment the plain token exists
+    on the server; only its hash is stored."""
     for _ in range(5):
         code = _generate_code()
         if db.query(models.Room).filter(models.Room.code == code).first() is None:
@@ -28,13 +74,14 @@ def create_room(db: Session) -> models.Room:
     else:
         raise RuntimeError("could not generate a unique room code")
 
-    room = models.Room(code=code, token=secrets.token_urlsafe(24))
+    token = secrets.token_urlsafe(24)
+    room = models.Room(code=code, token_hash=hash_token(token))
     db.add(room)
     db.commit()
     db.refresh(room)
     db.add(models.Page(room_id=room.id, page_number=1, strokes=[]))
     db.commit()
-    return room
+    return room, token
 
 
 def get_room_by_code(db: Session, code: str) -> Optional[models.Room]:
