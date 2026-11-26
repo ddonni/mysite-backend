@@ -2031,3 +2031,60 @@ def test_music_search_track_is_empty_when_itunes_fails(monkeypatch, ytm):
     resp = client.get("/api/search/music", params={"q": "샴페인", "by": "track"})
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+# --- 잡동사니(주인만 보는 카테고리, 2026-11-26) ---
+
+YT = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+
+def make_note(**overrides):
+    body = {"cat": "note", "title": "", "memo": "  요즘 필름 카메라에 꽂힘  "}
+    body.update(overrides)
+    return body
+
+
+def test_note_keeps_text_or_link_and_drops_the_rest(room):
+    url = f"/api/rooms/{room['code']}/records"
+    rec = client.post(url, json=make_note(title="무시됨", creator="누구", rating=4, in_progress=True),
+                      headers=auth(room)).json()
+    assert rec["memo"] == "요즘 필름 카메라에 꽂힘"
+    assert rec["title"] == "" and rec["creator"] is None and rec["rating"] == 0
+    assert rec["in_progress"] is False and rec["photo_url"] is None
+    # 사진만 있어도 됨(2026-11-26).
+    photo = client.post(url, json=make_note(memo="", photo_url="https://example.com/a.jpg"), headers=auth(room)).json()
+    assert photo["memo"] is None and photo["photo_url"] == "https://example.com/a.jpg"
+    # 링크만 있어도 됨.
+    linked = client.post(url, json=make_note(memo="", listen_url=YT), headers=auth(room)).json()
+    assert linked["memo"] is None and linked["listen_url"] == YT
+
+
+def test_note_needs_something_and_is_limited(room):
+    url = f"/api/rooms/{room['code']}/records"
+    assert client.post(url, json=make_note(memo="   "), headers=auth(room)).status_code == 422
+    assert client.post(url, json=make_note(memo="x" * 2001), headers=auth(room)).status_code == 422
+    assert client.post(url, json=make_note(listen_url="https://example.com/v"), headers=auth(room)).status_code == 422
+
+
+def test_notes_are_owner_only(room):
+    url = f"/api/rooms/{room['code']}/records"
+    client.post(url, json=make_record(), headers=auth(room))
+    client.post(url, json=make_note(), headers=auth(room))
+    assert sorted(r["cat"] for r in client.get(url, headers=auth(room)).json()) == ["book", "note"]
+    assert [r["cat"] for r in client.get(url).json()] == ["book"]
+    assert [r["cat"] for r in client.get(url, headers={"X-Room-Token": "wrong"}).json()] == ["book"]
+    assert client.get(url, params={"cat": "note"}).json() == []
+
+
+def test_notes_stay_out_of_public_list_likes_and_featured(room, visitor):
+    url = f"/api/rooms/{room['code']}/records"
+    note = client.post(url, json=make_note(), headers=auth(room)).json()
+    make_public(room)
+    # 잡동사니만 있는 방은 둘러보기에 안 뜸.
+    assert client.get("/api/rooms").json() == []
+    client.post(url, json=make_record(), headers=auth(room))
+    (listed,) = client.get("/api/rooms").json()
+    assert listed["total"] == 1 and "note" not in listed["counts"]
+    assert client.put(f"{url}/{note['id']}/likes", headers=actor(visitor)).status_code == 404
+    resp = _feature(room, note["id"])
+    assert resp.status_code == 400 and resp.json()["detail"] == "not_featurable"

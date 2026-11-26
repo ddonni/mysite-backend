@@ -278,14 +278,26 @@ class RecordDetails(BaseModel):
         return v
 
 
+# 카테고리 — 작품 넷 + ?!(note, 2026-11-26, 처음 이름 잡동사니: 형식 없는 글·유튜브 링크·사진). ?!는 **방 주인만**
+# 봄 — GET 목록은 토큰이 맞을 때만 넣고, 둘러보기 수·인생작·공감·자동 완성에서도 빠짐
+# (crud.list_records·list_public_rooms, social_routes._record).
+WORK_CATS = ("book", "anime", "movie", "music")
+PRIVATE_CATS = ("note",)
+CATS = WORK_CATS + PRIVATE_CATS
+NOTE_MAX = 2000
+
+
 class RecordIn(BaseModel):
     """One 'watched/read it' log entry. photo_url comes from POST
     /api/uploads — the client uploads the photo first, then sends the
     returned URL along with the rest of the fields — or is a Kakao cover
     URL picked from GET /api/search/book (stored as-is, shown through
-    GET /api/cover)."""
+    GET /api/cover).
 
-    cat: Literal["book", "anime", "movie", "music"]
+    ?!(cat="note", 처음 이름 잡동사니)는 글(memo)·유튜브 링크(listen_url)·사진(photo_url) 중 하나는 꼭 있어야
+    하고, 나머지 칸은 버림."""
+
+    cat: Literal[CATS]
     title: str
     creator: Optional[str] = None
     rating: float = 0
@@ -298,6 +310,18 @@ class RecordIn(BaseModel):
 
     @model_validator(mode="after")
     def _details_for_category(self) -> "RecordIn":
+        if self.cat == "note":
+            # 요청에만 — RecordOut(응답)도 이 검사를 물려받지만 저장된 값을 그대로 보여 줘야 함.
+            if type(self) is RecordIn:
+                memo = (self.memo or "").strip()
+                if not memo and not self.listen_url and not self.photo_url:
+                    raise ValueError("a note needs text, a YouTube link or a photo")
+                if len(memo) > NOTE_MAX:
+                    raise ValueError(f"a note is at most {NOTE_MAX} characters")
+                self.memo = memo or None
+                self.title, self.creator, self.rating = "", None, 0
+                self.details, self.in_progress = None, False
+            return self
         if self.cat == "music":
             self.in_progress = False
         # 음악(또는 비운 세부 기록)은 저장하지 않음. 그 밖엔 이 카테고리의 요소·장르만 받음.
